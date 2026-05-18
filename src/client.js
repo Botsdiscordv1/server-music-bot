@@ -1,15 +1,17 @@
 const { Client, GatewayIntentBits, Collection } = require("discord.js");
-const { LavalinkManager } = require("lavalink-client");
 const fs = require("fs");
 const path = require("path");
 
-// Monkey-patch: Render's proxy doesn't allow WebSocket on /v4/websocket, use / instead
-const dist = require.resolve("lavalink-client");
-const distSrc = fs.readFileSync(dist, "utf8");
+// Monkey-patch lavalink-client BEFORE requiring it: Render blocks WebSocket on /v4/websocket
+const lavalinkPkg = path.dirname(require.resolve("lavalink-client/package.json"));
+let distFile = path.join(lavalinkPkg, "dist", fs.existsSync(path.join(lavalinkPkg, "dist/index.cjs")) ? "index.cjs" : "index.js");
+let distSrc = fs.readFileSync(distFile, "utf8");
 if (distSrc.includes("/v4/websocket")) {
-  fs.writeFileSync(dist, distSrc.replace('/v4/websocket', '/'));
+  fs.writeFileSync(distFile, distSrc.replace('/v4/websocket', '/'));
   console.log("ℹ️  Patched lavalink-client WebSocket path to /");
 }
+
+const { LavalinkManager } = require("lavalink-client");
 
 function createClient() {
   const client = new Client({
