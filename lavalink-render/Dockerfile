@@ -21,6 +21,9 @@ ADD https://github.com/lavalink-devs/youtube-source/releases/download/${YT_VERSI
 COPY application.yml /app/
 COPY proxy.js /app/
 
-EXPOSE 10000 2333
+EXPOSE 2333
+
+# Override Lavalink config to use port 2334 (proxy listens on 2333)
+ENV _JAVA_OPTIONS="-Dserver.port=2334"
 
 CMD node /app/proxy.js & java -jar Lavalink.jar

@@ -1,7 +1,6 @@
-const http = require("http");
 const net = require("net");
 
-const LAVALINK_PORT = 2333;
+const LAVALINK_INTERNAL_PORT = 2334;
 
 function pipe(a, b) {
   a.on("data", (d) => b.write(d));
@@ -10,44 +9,14 @@ function pipe(a, b) {
   b.on("error", () => { try { a.destroy(); } catch {} });
 }
 
-const server = http.createServer((req, res) => {
-  const opts = {
-    hostname: "localhost",
-    port: LAVALINK_PORT,
-    path: req.url,
-    method: req.method,
-    headers: req.headers,
-  };
-  const preq = http.request(opts, (pres) => {
-    res.writeHead(pres.statusCode, pres.headers);
-    pres.pipe(res);
+const server = net.createServer((client) => {
+  const backend = net.connect(LAVALINK_INTERNAL_PORT, "localhost", () => {
+    pipe(client, backend);
+    pipe(backend, client);
   });
-  preq.on("error", () => { res.writeHead(502); res.end(); });
-  req.pipe(preq);
+  backend.on("error", () => client.destroy());
+  client.on("error", () => backend.destroy());
 });
 
-server.on("upgrade", (req, socket, head) => {
-  // Render blocks WebSocket on /v4/websocket, so lavalink-client connects to /
-  // Rewrite to Lavalink's actual WebSocket path
-  const targetPath = "/v4/websocket";
-  const psock = net.connect(LAVALINK_PORT, "localhost", () => {
-    const lines = [
-      `GET ${targetPath} HTTP/1.1`,
-      `Host: localhost:${LAVALINK_PORT}`,
-      `Connection: Upgrade`,
-      `Upgrade: websocket`,
-    ];
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (!["host", "connection", "upgrade"].includes(k.toLowerCase())) {
-        lines.push(`${k}: ${v}`);
-      }
-    }
-    lines.push("", "");
-    psock.write(lines.join("\r\n"));
-    psock.write(head);
-    pipe(socket, psock);
-  });
-  psock.on("error", () => socket.destroy());
-});
-
-server.listen(10000, () => console.log("✅ Proxy listening on port 10000"));
+const PORT = Number(process.env.PROXY_PORT) || 2333;
+server.listen(PORT, () => console.log(`✅ TCP proxy listening on port ${PORT} → ${LAVALINK_INTERNAL_PORT}`));
