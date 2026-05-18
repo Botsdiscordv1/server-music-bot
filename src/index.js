@@ -36,7 +36,23 @@ async function main() {
   console.log("[DIAG] LAVALINK_HOST:", process.env.LAVALINK_HOST || "NOT SET");
 
   const client = createClient();
-  await client.login(process.env.DISCORD_TOKEN);
+
+  client.on("error", (err) => console.error("[CLIENT ERROR]", err));
+
+  const loginTimeout = setTimeout(() => {
+    console.error("[DIAG] Login timed out after 15 seconds");
+    process.exit(1);
+  }, 15000);
+
+  try {
+    await client.login(process.env.DISCORD_TOKEN);
+    clearTimeout(loginTimeout);
+    console.log("[DIAG] Login successful, waiting for ready event...");
+  } catch (err) {
+    clearTimeout(loginTimeout);
+    console.error("[DIAG] Login failed:", err.message, err.code, err.status);
+    process.exit(1);
+  }
 }
 
 main().catch(console.error);
