@@ -1,13 +1,24 @@
 const { getRecommendations, searchTracks } = require("./spotify");
 
-function norm(str) {
-  return str
-    .toLowerCase()
-    .replace(/\(.*?\)|\[.*?\]/g, "")
-    .replace(/\s*-\s*topic$/gi, "")
-    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+const VARIANT_WORDS = [
+  "acoustic", "live", "remix", "cover", "instrumental", "sped ?up", "slowed ?down",
+  "reverb", "extended", "radio edit", "club mix", "dub mix", "original mix",
+  "orchestral", "piano", "strings", "demo", "edit", "reprise", "rework",
+  "reimagined", "stripped", "session", "performance", "karaoke", "nightcore",
+  "daycore", "super slowed", "8d", "lyric video", "lyrics", "official video",
+  "official audio", "official lyric", "visualizer", "remastered", "spedup",
+  "sloweddown", "a cappella", "acapella",
+];
+
+function stripVariantSuffix(str) {
+  let s = str;
+  for (const word of VARIANT_WORDS) {
+    const regex = new RegExp(
+      `[-–—|:.,;]\\s*(${word})\\s*(version)?\\s*$`, "gi"
+    );
+    s = s.replace(regex, "");
+  }
+  return s.trim();
 }
 
 function coreTitle(title) {
@@ -31,26 +42,32 @@ function normAuthor(author) {
 
 function buildSkipData(player, currentTrack) {
   const skipIds = new Set();
-  const skipTitles = new Set();
+  const skipBases = new Set();
   const skipFull = new Set();
   const all = [currentTrack, ...(player.queue.previous || []), ...(player.queue.tracks || [])];
   for (const t of all) {
     if (t?.info?.identifier) skipIds.add(t.info.identifier);
     if (t?.info?.title) {
-      skipTitles.add(coreTitle(t.info.title));
+      skipBases.add(coreTitle(stripVariantSuffix(t.info.title)));
       skipFull.add(`${coreTitle(t.info.title)}|${normAuthor(t.info.author || "")}`);
     }
   }
-  return { skipIds, skipTitles, skipFull };
+  return { skipIds, skipBases, skipFull };
 }
 
-function isDuplicate(candidate, { skipIds, skipTitles, skipFull }) {
+function isDuplicate(candidate, { skipIds, skipBases, skipFull }) {
   if (skipIds.has(candidate.info.identifier)) return true;
   const cTitle = coreTitle(candidate.info.title || "");
   const cAuthor = normAuthor(candidate.info.author || "");
+  const cBase = coreTitle(stripVariantSuffix(candidate.info.title || ""));
   if (skipFull.has(`${cTitle}|${cAuthor}`)) return true;
-  if (skipTitles.has(cTitle)) return true;
+  if (skipBases.has(cBase)) return true;
   return false;
+}
+
+function isVariant(title) {
+  const lower = title.toLowerCase();
+  return VARIANT_WORDS.some((w) => new RegExp(`\\b${w}\\b`, "i").test(lower));
 }
 
 async function getAutoplayTrack(player, currentTrack) {
@@ -60,6 +77,18 @@ async function getAutoplayTrack(player, currentTrack) {
   if (spotifyResult) return spotifyResult;
 
   return trySearchFallback(player, currentTrack, skipData);
+}
+
+function pickBest(tracks, skipData, source = "ytmsearch") {
+  let fallback = null;
+  for (const t of tracks) {
+    if (isDuplicate(t, skipData)) continue;
+    if (!isVariant(t.info.title || "")) {
+      return { track: t, source };
+    }
+    if (!fallback) fallback = t;
+  }
+  return fallback ? { track: fallback, source } : null;
 }
 
 async function trySpotify(player, currentTrack, skipData) {
@@ -89,11 +118,8 @@ async function trySpotify(player, currentTrack, skipData) {
         { username: "Autoplay", id: "autoplay" }
       );
       if (result?.tracks?.length) {
-        for (const candidate of result.tracks) {
-          if (!isDuplicate(candidate, skipData)) {
-            return { track: candidate, source: "spotify" };
-          }
-        }
+        const best = pickBest(result.tracks, skipData, "spotify");
+        if (best) return best;
       }
     }
   } catch (err) {
@@ -117,11 +143,8 @@ async function trySearchFallback(player, currentTrack, skipData) {
         { username: "Autoplay", id: "autoplay" }
       );
       if (result?.tracks?.length > 1) {
-        for (const t of result.tracks) {
-          if (!isDuplicate(t, skipData)) {
-            return { track: t, source: "ytmsearch" };
-          }
-        }
+        const best = pickBest(result.tracks, skipData, "ytmsearch");
+        if (best) return best;
       }
     } catch {}
   }
@@ -132,11 +155,8 @@ async function trySearchFallback(player, currentTrack, skipData) {
       { username: "Autoplay", id: "autoplay" }
     );
     if (result?.tracks?.length > 1) {
-      for (const t of result.tracks) {
-        if (!isDuplicate(t, skipData)) {
-          return { track: t, source: "ytsearch" };
-        }
-      }
+      const best = pickBest(result.tracks, skipData, "ytsearch");
+      if (best) return best;
     }
   } catch {}
 
