@@ -2,12 +2,12 @@ const http = require("http");
 
 function keepAlive(node) {
   const opts = {
-    hostname: node.host,
-    port: node.port || 2333,
+    hostname: node.options.host,
+    port: node.options.port || 2333,
     path: "/v4/info",
     method: "GET",
     timeout: 5000,
-    headers: { Authorization: node.authorization },
+    headers: { Authorization: node.options.authorization },
   };
   const req = http.request(opts, (res) => res.resume());
   req.on("error", () => {});
