@@ -3,13 +3,17 @@ const fs = require("fs");
 const path = require("path");
 
 // Monkey-patch lavalink-client BEFORE requiring it: Render blocks WebSocket on /v4/websocket
-const lavalinkPkg = path.dirname(require.resolve("lavalink-client/package.json"));
-let distFile = path.join(lavalinkPkg, "dist", fs.existsSync(path.join(lavalinkPkg, "dist/index.cjs")) ? "index.cjs" : "index.js");
-let distSrc = fs.readFileSync(distFile, "utf8");
-if (distSrc.includes("/v4/websocket")) {
-  fs.writeFileSync(distFile, distSrc.replace('/v4/websocket', '/'));
-  console.log("ℹ️  Patched lavalink-client WebSocket path to /");
+function patchLavalink() {
+  const entry = require.resolve("lavalink-client");
+  const dir = path.dirname(entry);
+  const distFile = path.join(dir, fs.existsSync(path.join(dir, "index.cjs")) ? "index.cjs" : "index.js");
+  let src = fs.readFileSync(distFile, "utf8");
+  if (src.includes("/v4/websocket")) {
+    fs.writeFileSync(distFile, src.replace('/v4/websocket', '/'));
+    console.log("ℹ️  Patched lavalink-client WebSocket path to /");
+  }
 }
+patchLavalink();
 
 const { LavalinkManager } = require("lavalink-client");
 
