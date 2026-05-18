@@ -1,6 +1,7 @@
 require("dotenv").config();
 const http = require("http");
 const https = require("https");
+const dns = require("dns");
 const { createClient } = require("./client");
 const { initDB } = require("./database");
 
@@ -28,6 +29,18 @@ setInterval(() => {
   caller.get(SELF_URL, (res) => res.on("data", () => {}));
 }, 5 * 60 * 1000);
 
+async function testDiscordApi() {
+  return new Promise((resolve) => {
+    const req = https.get("https://discord.com/api/v10/gateway", { timeout: 10000 }, (res) => {
+      let data = "";
+      res.on("data", (c) => data += c);
+      res.on("end", () => resolve({ ok: true, data }));
+    });
+    req.on("error", (err) => resolve({ ok: false, error: err.message }));
+    req.on("timeout", () => { req.destroy(); resolve({ ok: false, error: "timeout" }); });
+  });
+}
+
 async function main() {
   await initDB();
 
@@ -35,14 +48,23 @@ async function main() {
   console.log("[DIAG] CLIENT_ID:", process.env.CLIENT_ID || "NOT SET");
   console.log("[DIAG] LAVALINK_HOST:", process.env.LAVALINK_HOST || "NOT SET");
 
+  console.log("[DIAG] Testing Discord API connectivity...");
+  const apiTest = await testDiscordApi();
+  console.log("[DIAG] Discord API test:", apiTest.ok ? "OK" : `FAILED - ${apiTest.error}`);
+
+  if (apiTest.ok) {
+    const url = JSON.parse(apiTest.data).url;
+    console.log("[DIAG] Gateway URL:", url);
+  }
+
   const client = createClient();
 
   client.on("error", (err) => console.error("[CLIENT ERROR]", err));
 
   const loginTimeout = setTimeout(() => {
-    console.error("[DIAG] Login timed out after 15 seconds");
+    console.error("[DIAG] Login timed out after 20 seconds");
     process.exit(1);
-  }, 15000);
+  }, 20000);
 
   try {
     await client.login(process.env.DISCORD_TOKEN);
