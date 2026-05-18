@@ -132,7 +132,8 @@ function loadEvents(client) {
         event.execute(...args, client)
       );
     }
-    console.log(`✅ Loaded Lavalink event: ${event.name}`);
+    const label = event.name === "error" ? "error-handler" : event.name;
+    console.log(`✅ Loaded Lavalink event: ${label}`);
   }
 }
 
