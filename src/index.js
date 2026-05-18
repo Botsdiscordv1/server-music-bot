@@ -30,6 +30,11 @@ setInterval(() => {
 
 async function main() {
   await initDB();
+
+  console.log("[DIAG] DISCORD_TOKEN:", process.env.DISCORD_TOKEN ? `${process.env.DISCORD_TOKEN.slice(0, 8)}...` : "NOT SET");
+  console.log("[DIAG] CLIENT_ID:", process.env.CLIENT_ID || "NOT SET");
+  console.log("[DIAG] LAVALINK_HOST:", process.env.LAVALINK_HOST || "NOT SET");
+
   const client = createClient();
   await client.login(process.env.DISCORD_TOKEN);
 }
