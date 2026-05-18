@@ -1,4 +1,13 @@
 require("dotenv").config();
+
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught exception:", err.message);
+});
+process.on("unhandledRejection", (reason) => {
+  if (reason?.message?.includes("WebSocket was closed before the connection was established")) return;
+  console.error("❌ Unhandled rejection:", reason?.message ?? reason);
+});
+
 const http = require("http");
 const { createClient } = require("./client");
 const { initDB } = require("./database");
