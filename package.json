@@ -1,0 +1,22 @@
+{
+  "name": "discord-music-bot",
+  "version": "1.0.0",
+  "description": "Discord music bot with Spotify metadata and LRCLib lyrics",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node src/deploy-commands.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "lavalink-client": "^2.4.0",
+    "sql.js": "^1.11.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
