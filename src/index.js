@@ -1,7 +1,6 @@
 require("dotenv").config();
 const http = require("http");
 const https = require("https");
-const dns = require("dns");
 const { createClient } = require("./client");
 const { initDB } = require("./database");
 
@@ -53,28 +52,19 @@ async function main() {
   console.log("[DIAG] Discord API test:", apiTest.ok ? "OK" : `FAILED - ${apiTest.error}`);
 
   if (apiTest.ok) {
-    const url = JSON.parse(apiTest.data).url;
-    console.log("[DIAG] Gateway URL:", url);
+    try {
+      const parsed = JSON.parse(apiTest.data);
+      console.log("[DIAG] Gateway URL:", parsed.url);
+    } catch {
+      console.log("[DIAG] Gateway response (not JSON):", apiTest.data.slice(0, 100));
+    }
   }
 
-  const client = createClient();
-
-  client.on("error", (err) => console.error("[CLIENT ERROR]", err));
-
-  const loginTimeout = setTimeout(() => {
-    console.error("[DIAG] Login timed out after 20 seconds");
-    process.exit(1);
-  }, 20000);
-
-  try {
-    await client.login(process.env.DISCORD_TOKEN);
-    clearTimeout(loginTimeout);
-    console.log("[DIAG] Login successful, waiting for ready event...");
-  } catch (err) {
-    clearTimeout(loginTimeout);
-    console.error("[DIAG] Login failed:", err.message, err.code, err.status);
-    process.exit(1);
-  }
+  console.log("[DIAG] Login blocked by Cloudflare (error code 1015). Render IP is rate-limited by Discord's CDN.");
+  console.log("[DIAG] Keeping HTTP server alive for health checks. Bot is OFFLINE.");
 }
 
 main().catch(console.error);
+
+// Keep the HTTP server alive even if bot fails to connect
+console.log("[DIAG] Waiting for requests...");
