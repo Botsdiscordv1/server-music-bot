@@ -10,4 +10,3 @@ services:
       - key: LAVALINK_PASSWORD
         sync: false
     healthCheckPath: /
-    healthCheckPort: 10000
