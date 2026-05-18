@@ -35,6 +35,15 @@ function createClient() {
         retryDelay: 5000,
         maxRetry: -1,
       }] : []),
+      ...(process.env.LAVALINK_HOST3 ? [{
+        id: "backup2",
+        host: process.env.LAVALINK_HOST3,
+        port: Number(process.env.LAVALINK_PORT3) || 2333,
+        authorization: process.env.LAVALINK_PASSWORD3 || "youshallnotpass",
+        secure: process.env.LAVALINK_SECURE3 === "true",
+        retryDelay: 5000,
+        maxRetry: -1,
+      }] : []),
     ],
     sendToShard: (guildId, payload) => {
       const guild = client.guilds.cache.get(guildId);
