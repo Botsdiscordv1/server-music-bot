@@ -1,0 +1,13 @@
+diff --git a/node_modules/lavalink-client/dist/index.cjs b/node_modules/lavalink-client/dist/index.cjs
+index 5983558..fac48bc 100644
+--- a/node_modules/lavalink-client/dist/index.cjs
++++ b/node_modules/lavalink-client/dist/index.cjs
+@@ -1700,7 +1700,7 @@ var LavalinkNode = class _LavalinkNode {
+       this.sessionId = this.options.sessionId || sessionId;
+     }
+     this.socket = new import_ws.default(
+-      `ws${this.options.secure ? "s" : ""}://${this.options.host}:${this.options.port}/v4/websocket`,
++      `ws${this.options.secure ? "s" : ""}://${this.options.host}:${this.options.port}/${this.version}/websocket`,
+       { headers }
+     );
+     this.socket.on("open", this.open.bind(this));
