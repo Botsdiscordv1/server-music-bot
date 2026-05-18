@@ -17,7 +17,8 @@ function keepAlive(node) {
 module.exports = {
   name: "connect",
   execute(node, client) {
-    console.log(`✅ Lavalink node connected: ${node.id}`);
+    const proto = node.options.secure ? "wss" : "ws";
+    console.log(`✅ Lavalink node connected: ${node.id} (${proto}://${node.options.host}:${node.options.port}/v4/websocket)`);
 
     if (node._keepAlive) clearInterval(node._keepAlive);
     node._keepAlive = setInterval(() => keepAlive(node), 25000);
