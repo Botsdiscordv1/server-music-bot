@@ -27,9 +27,12 @@ const server = http.createServer((req, res) => {
 });
 
 server.on("upgrade", (req, socket, head) => {
+  // Render blocks WebSocket on /v4/websocket, so lavalink-client connects to /
+  // Rewrite to Lavalink's actual WebSocket path
+  const targetPath = "/v4/websocket";
   const psock = net.connect(LAVALINK_PORT, "localhost", () => {
     const lines = [
-      `GET ${req.url} HTTP/1.1`,
+      `GET ${targetPath} HTTP/1.1`,
       `Host: localhost:${LAVALINK_PORT}`,
       `Connection: Upgrade`,
       `Upgrade: websocket`,

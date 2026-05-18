@@ -3,6 +3,14 @@ const { LavalinkManager } = require("lavalink-client");
 const fs = require("fs");
 const path = require("path");
 
+// Monkey-patch: Render's proxy doesn't allow WebSocket on /v4/websocket, use / instead
+const dist = require.resolve("lavalink-client");
+const distSrc = fs.readFileSync(dist, "utf8");
+if (distSrc.includes("/v4/websocket")) {
+  fs.writeFileSync(dist, distSrc.replace('/v4/websocket', '/'));
+  console.log("ℹ️  Patched lavalink-client WebSocket path to /");
+}
+
 function createClient() {
   const client = new Client({
     intents: [
