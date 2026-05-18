@@ -1,3 +1,5 @@
+const { getAutoplayTrack } = require("../../services/autoplay");
+
 module.exports = {
   name: "queueEnd",
   async execute(player, track, payload, client) {
@@ -15,32 +17,25 @@ module.exports = {
 
     if (player._autoplayEnabled && track) {
       try {
-        const query = `${track.info.title} ${track.info.author}`;
-        const result = await player.search(
-          { query, source: "ytmsearch" },
-          { username: "Autoplay", id: "autoplay" }
-        );
+        const result = await getAutoplayTrack(player, track);
 
-        if (result?.tracks?.length > 1) {
-          const currentId = track.info.identifier;
-          const other = result.tracks.filter((t) => t.info.identifier !== currentId);
+        if (result) {
+          const pick = result.track;
+          const label = result.source === "spotify" ? " (via Spotify)" : "";
 
-          if (other.length > 0) {
-            const pick = other[Math.floor(Math.random() * other.length)];
-            player.queue.add(pick);
+          player.queue.add(pick);
 
-            if (!player.playing && !player.paused) {
-              await player.play({ paused: false });
-              player._trackStartTime = Date.now();
-            }
-
-            const channel = client.channels.cache.get(player.textChannelId);
-            if (channel) {
-              channel.send({ content: `🔁 Autoplay: **${pick.info.title}** — ${pick.info.author}` }).catch(() => {});
-            }
-
-            return;
+          if (!player.playing && !player.paused) {
+            await player.play({ paused: false });
+            player._trackStartTime = Date.now();
           }
+
+          const channel = client.channels.cache.get(player.textChannelId);
+          if (channel) {
+            channel.send({ content: `🔁 Autoplay: **${pick.info.title}** — ${pick.info.author}${label}` }).catch(() => {});
+          }
+
+          return;
         }
       } catch (err) {
         console.error("[Autoplay] Error:", err.message);

@@ -4,6 +4,7 @@ const { getLyrics, formatLyricsForEmbed } = require("../../services/lrclib");
 const { startKaraoke } = require("../../commands/music/karaoke");
 const searchCommand = require("../../commands/music/search");
 const { addLikedSong } = require("../../database");
+const { getAutoplayTrack } = require("../../services/autoplay");
 
 module.exports = {
   name: "interactionCreate",
@@ -123,22 +124,11 @@ async function handlePlaybackButton(interaction, client) {
         if (player.queue.tracks.length > 0) {
           await player.skip();
         } else if (player._autoplayEnabled && player.queue.current) {
-          const track = player.queue.current;
-          const query = `${track.info.title} ${track.info.author}`;
-          try {
-            const result = await player.search(
-              { query, source: "ytmsearch" },
-              { username: "Autoplay", id: "autoplay" }
-            );
-            if (result?.tracks?.length > 1) {
-              const other = result.tracks.filter((t) => t.info.identifier !== track.info.identifier);
-              if (other.length > 0) {
-                const pick = other[Math.floor(Math.random() * other.length)];
-                player.queue.add(pick);
-                await player.skip();
-              }
-            }
-          } catch {}
+          const result = await getAutoplayTrack(player, player.queue.current).catch(() => null);
+          if (result) {
+            player.queue.add(result.track);
+            await player.skip();
+          }
         }
         break;
       }
