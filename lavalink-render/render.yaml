@@ -9,8 +9,5 @@ services:
     envVars:
       - key: LAVALINK_PASSWORD
         sync: false
-      - key: SPOTIFY_CLIENT_ID
-        sync: false
-      - key: SPOTIFY_CLIENT_SECRET
-        sync: false
     healthCheckPath: /
+    healthCheckPort: 10000
