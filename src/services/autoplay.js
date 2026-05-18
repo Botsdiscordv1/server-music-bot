@@ -3,43 +3,66 @@ const { getRecommendations, searchTracks } = require("./spotify");
 function norm(str) {
   return str
     .toLowerCase()
-    .replace(/\(official\s+(music\s+)?video\)|\(lyric\s+video\)|\(audio\)|\(visualizer\)|\(official\)|\(hd\)|\(4k\)|\(360\)|\(.*?remaster.*?\)|\(.*?remix.*?\)|\s*-\s*topic$/gi, "")
-    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\(.*?\)|\[.*?\]/g, "")
+    .replace(/\s*-\s*topic$/gi, "")
+    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function makeNameKey(t) {
-  return norm(`${t.info.title} ${t.info.author}`);
+function coreTitle(title) {
+  return title
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, "")
+    .replace(/\s*-\s*topic$/gi, "")
+    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function isDuplicate(candidate, skipNames, skipIds) {
-  if (skipIds.has(candidate.info.identifier)) return true;
-  if (skipNames.has(makeNameKey(candidate))) return true;
-  return false;
-}
-
-async function getAutoplayTrack(player, currentTrack) {
-  const { skipIds, skipNames } = buildSkipData(player, currentTrack);
-
-  const spotifyResult = await trySpotify(player, currentTrack, skipIds, skipNames);
-  if (spotifyResult) return spotifyResult;
-
-  return trySearchFallback(player, currentTrack, skipIds, skipNames);
+function normAuthor(author) {
+  return author
+    .toLowerCase()
+    .replace(/\s*-\s*topic$/gi, "")
+    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function buildSkipData(player, currentTrack) {
   const skipIds = new Set();
-  const skipNames = new Set();
+  const skipTitles = new Set();
+  const skipFull = new Set();
   const all = [currentTrack, ...(player.queue.previous || []), ...(player.queue.tracks || [])];
   for (const t of all) {
     if (t?.info?.identifier) skipIds.add(t.info.identifier);
-    if (t?.info?.title) skipNames.add(makeNameKey(t));
+    if (t?.info?.title) {
+      skipTitles.add(coreTitle(t.info.title));
+      skipFull.add(`${coreTitle(t.info.title)}|${normAuthor(t.info.author || "")}`);
+    }
   }
-  return { skipIds, skipNames };
+  return { skipIds, skipTitles, skipFull };
 }
 
-async function trySpotify(player, currentTrack, skipIds, skipNames) {
+function isDuplicate(candidate, { skipIds, skipTitles, skipFull }) {
+  if (skipIds.has(candidate.info.identifier)) return true;
+  const cTitle = coreTitle(candidate.info.title || "");
+  const cAuthor = normAuthor(candidate.info.author || "");
+  if (skipFull.has(`${cTitle}|${cAuthor}`)) return true;
+  if (skipTitles.has(cTitle)) return true;
+  return false;
+}
+
+async function getAutoplayTrack(player, currentTrack) {
+  const skipData = buildSkipData(player, currentTrack);
+
+  const spotifyResult = await trySpotify(player, currentTrack, skipData);
+  if (spotifyResult) return spotifyResult;
+
+  return trySearchFallback(player, currentTrack, skipData);
+}
+
+async function trySpotify(player, currentTrack, skipData) {
   let spotifyId =
     currentTrack?.pluginInfo?.identifier ||
     currentTrack?.info?.uri?.match(/track[:/]([A-Za-z0-9]+)/)?.[1];
@@ -67,7 +90,7 @@ async function trySpotify(player, currentTrack, skipIds, skipNames) {
       );
       if (result?.tracks?.length) {
         for (const candidate of result.tracks) {
-          if (!isDuplicate(candidate, skipNames, skipIds)) {
+          if (!isDuplicate(candidate, skipData)) {
             return { track: candidate, source: "spotify" };
           }
         }
@@ -80,7 +103,7 @@ async function trySpotify(player, currentTrack, skipIds, skipNames) {
   return null;
 }
 
-async function trySearchFallback(player, currentTrack, skipIds, skipNames) {
+async function trySearchFallback(player, currentTrack, skipData) {
   const queries = [
     `${currentTrack.info.title} ${currentTrack.info.author}`,
     `${currentTrack.info.author} - ${currentTrack.info.title}`,
@@ -95,7 +118,7 @@ async function trySearchFallback(player, currentTrack, skipIds, skipNames) {
       );
       if (result?.tracks?.length > 1) {
         for (const t of result.tracks) {
-          if (!isDuplicate(t, skipNames, skipIds)) {
+          if (!isDuplicate(t, skipData)) {
             return { track: t, source: "ytmsearch" };
           }
         }
@@ -110,7 +133,7 @@ async function trySearchFallback(player, currentTrack, skipIds, skipNames) {
     );
     if (result?.tracks?.length > 1) {
       for (const t of result.tracks) {
-        if (!isDuplicate(t, skipNames, skipIds)) {
+        if (!isDuplicate(t, skipData)) {
           return { track: t, source: "ytsearch" };
         }
       }
