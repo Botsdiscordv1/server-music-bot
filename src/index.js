@@ -8,7 +8,8 @@ process.on("unhandledRejection", (reason) => {
   console.error("❌ Unhandled rejection:", reason?.message ?? reason);
 });
 
-const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
+const LAVALINK_HOST = process.env.LAVALINK_CF_WORKER || process.env.LAVALINK_HOST || "localhost";
+const LAVALINK_IS_WORKER = !!process.env.LAVALINK_CF_WORKER;
 
 const http = require("http");
 const { WebSocket } = require("ws");
@@ -37,15 +38,14 @@ const server = http.createServer((req, res) => {
     const t = [];
     const theDns = require("dns");
     async function run() {
-      t.push(`Host: ${LAVALINK_HOST}:${Number(process.env.LAVALINK_PORT) || 2333} secure=${process.env.LAVALINK_SECURE}`);
-      t.push("\n=== System DNS ===");
+      const effectiveHost = LAVALINK_IS_WORKER ? LAVALINK_HOST : `${LAVALINK_HOST}:${Number(process.env.LAVALINK_PORT) || 2333}`;
+      t.push(`Using: ${LAVALINK_IS_WORKER ? "Cloudflare Worker" : "Direct Render"} → ${LAVALINK_HOST}`);
+      t.push("\n=== DNS ===");
       try { const addrs = await theDns.promises.resolve4(LAVALINK_HOST); t.push(addrs.join(", ")); } catch (e) { t.push(`ERROR: ${e.message}`); }
-      t.push("\n=== Google DNS (8.8.8.8) ===");
-      try { const r = new theDns.promises.Resolver(); r.setServers(["8.8.8.8"]); const cf = await r.resolve4(LAVALINK_HOST); t.push(cf.join(", ")); } catch (e) { t.push(`ERROR: ${e.message}`); }
       t.push("\n=== REST ===");
       try { const r = await fetch(`https://${LAVALINK_HOST}/v4/info`, { headers: { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass" }, signal: AbortSignal.timeout(10000) }); t.push(`HTTP ${r.status}`); } catch (e) { t.push(`ERROR: ${e.message}`); }
       t.push("\n=== WS ===");
-      t.push(await testWS(`ws${process.env.LAVALINK_SECURE === "true" ? "s" : ""}://${LAVALINK_HOST}:${Number(process.env.LAVALINK_PORT) || 2333}/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
+      t.push(await testWS(`wss://${LAVALINK_HOST}/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end(t.join("\n"));
     }
