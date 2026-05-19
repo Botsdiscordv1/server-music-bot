@@ -37,7 +37,7 @@ function createClient() {
     },
     playerOptions: {
       applyVolumeAsFilter: false,
-      clientBasedPositionUpdateInterval: 1000,
+      clientBasedPositionUpdateInterval: 5000,
       defaultSearchPlatform: "ytmsearch",
       volumeDecrementer: 0.75,
       onDisconnect: {

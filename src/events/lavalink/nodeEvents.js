@@ -20,7 +20,7 @@ module.exports = {
     console.log(`✅ Lavalink node connected: ${node.id} (${proto}://${node.options.host}:${node.options.port}/v4/websocket)`);
 
     if (node._keepAlive) clearInterval(node._keepAlive);
-    node._keepAlive = setInterval(() => keepAlive(node), 25000);
+    node._keepAlive = setInterval(() => keepAlive(node), 60000);
 
     if (!client?.lavalink?.players) return;
     for (const [, player] of client.lavalink.players) {
