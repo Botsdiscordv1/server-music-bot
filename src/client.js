@@ -19,10 +19,10 @@ function createClient() {
     nodes: [
       {
         id: "main",
-        host: process.env.LAVALINK_HOST || "localhost",
-        port: Number(process.env.LAVALINK_PORT) || 2333,
-        authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass",
-        secure: process.env.LAVALINK_SECURE === "true",
+        host: "168.222.251.98",
+        port: 7107,
+        authorization: "Rocky",
+        secure: false,
         retryDelay: 5000,
         maxRetry: -1,
       },
