@@ -19,7 +19,7 @@ module.exports = {
     player._lyricsCache = null;
 
     if (player._djMode && track && player.queue.tracks.length <= 4) {
-      refillQueue(player, client);
+      refillQueue(player, client).catch(e => console.error("[DJ refill] Error:", e.message));
     }
   },
 };
