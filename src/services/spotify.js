@@ -85,16 +85,19 @@ async function getPlaylist(playlistId) {
 }
 
 /**
- * Get Spotify recommendations based on seed tracks.
+ * Get Spotify recommendations based on seed tracks and/or seed artists.
  * @param {string[]} seedTrackIds  Up to 5 Spotify track IDs
+ * @param {string[]} seedArtistIds  Up to 2 Spotify artist IDs
  * @returns {SpotifyTrack[]}
  */
-async function getRecommendations(seedTrackIds) {
+async function getRecommendations(seedTrackIds = [], seedArtistIds = []) {
   const token = await getAccessToken();
-  const seeds = seedTrackIds.slice(0, 5).join(",");
+  const params = { limit: 10 };
+  if (seedTrackIds.length > 0) params.seed_tracks = seedTrackIds.slice(0, 5).join(",");
+  if (seedArtistIds.length > 0) params.seed_artists = seedArtistIds.slice(0, 2).join(",");
   const res = await axios.get("https://api.spotify.com/v1/recommendations", {
     headers: { Authorization: `Bearer ${token}` },
-    params: { seed_tracks: seeds, limit: 10 },
+    params,
   });
   return res.data.tracks.map(formatTrack);
 }

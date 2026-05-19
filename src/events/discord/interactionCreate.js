@@ -4,6 +4,7 @@ const { getLyrics, formatLyricsForEmbed } = require("../../services/lrclib");
 const { startKaraoke } = require("../../commands/music/karaoke");
 const searchCommand = require("../../commands/music/search");
 const { addLikedSong } = require("../../database");
+const { getSpotifyId } = require("../../commands/music/dj");
 const { getAutoplayTrack } = require("../../services/autoplay");
 
 module.exports = {
@@ -121,6 +122,13 @@ async function handlePlaybackButton(interaction, client) {
       }
       case "playback_skip": {
         await interaction.deferUpdate();
+        if (player._djMode && player.queue.current) {
+          const id = await getSpotifyId(player.queue.current);
+          if (id) {
+            player._djNegativeSeeds = [...(player._djNegativeSeeds || []), id].slice(-10);
+            player._djPositiveSeeds = (player._djPositiveSeeds || []).filter(s => s !== id);
+          }
+        }
         if (player.queue.tracks.length > 0) {
           await player.skip();
         } else if (player._autoplayEnabled && player.queue.current) {
@@ -208,6 +216,12 @@ case "playback_lyrics": {
             return interaction.reply({ embeds: [errorEmbed("No hay ninguna canción reproduciéndose.")], flags: MessageFlags.Ephemeral });
           }
           await addLikedSong(interaction.user.id, track);
+          if (player._djMode) {
+            const id = await getSpotifyId(track);
+            if (id && !(player._djPositiveSeeds || []).includes(id)) {
+              player._djPositiveSeeds = [...(player._djPositiveSeeds || []), id].slice(-10);
+            }
+          }
           await interaction.reply({ embeds: [successEmbed(`❤️ **${track.info.title}** añadida a Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
           break;
         }
