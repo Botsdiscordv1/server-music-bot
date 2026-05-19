@@ -1,5 +1,5 @@
 server:
-  port: 2333
+  port: 8080
   address: 0.0.0.0
 
 lavalink:
@@ -57,8 +57,8 @@ plugins:
       deezer: false
       yandexmusic: false
     spotify:
-      clientId: ${SPOTIFY_CLIENT_ID:f75a4775bdb6438ca0a706b48123d044}
-      clientSecret: ${SPOTIFY_CLIENT_SECRET:565222346b3346738931226b9083d865}
+      clientId: ${SPOTIFY_CLIENT_ID}
+      clientSecret: ${SPOTIFY_CLIENT_SECRET}
       countryCode: "PE"
       playlistLoadLimit: 200
       albumLoadLimit: 100

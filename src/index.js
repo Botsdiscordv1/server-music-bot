@@ -8,8 +8,7 @@ process.on("unhandledRejection", (reason) => {
   console.error("❌ Unhandled rejection:", reason?.message ?? reason);
 });
 
-const LAVALINK_HOST = process.env.LAVALINK_CF_WORKER || process.env.LAVALINK_HOST || "localhost";
-const LAVALINK_IS_WORKER = !!process.env.LAVALINK_CF_WORKER;
+const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
 
 const http = require("http");
 const { WebSocket } = require("ws");
@@ -38,8 +37,7 @@ const server = http.createServer((req, res) => {
     const t = [];
     const theDns = require("dns");
     async function run() {
-      const effectiveHost = LAVALINK_IS_WORKER ? LAVALINK_HOST : `${LAVALINK_HOST}:${Number(process.env.LAVALINK_PORT) || 2333}`;
-      t.push(`Using: ${LAVALINK_IS_WORKER ? "Cloudflare Worker" : "Direct Render"} → ${LAVALINK_HOST}`);
+      t.push(`Host: ${LAVALINK_HOST}`);
       t.push("\n=== DNS ===");
       try { const addrs = await theDns.promises.resolve4(LAVALINK_HOST); t.push(addrs.join(", ")); } catch (e) { t.push(`ERROR: ${e.message}`); }
       t.push("\n=== REST ===");

@@ -14,6 +14,6 @@ ADD https://github.com/lavalink-devs/youtube-source/releases/download/${YT_VERSI
 
 COPY application.yml /app/
 
-EXPOSE 2333
+EXPOSE 8080
 
 CMD java -jar Lavalink.jar
