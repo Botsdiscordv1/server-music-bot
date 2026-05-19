@@ -1,11 +1,5 @@
 FROM eclipse-temurin:17-jre
 
-# Install Node.js 20 (needed for WebSocket proxy)
-RUN apt-get update && apt-get install -y curl ca-certificates && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 ARG LAVALINK_VERSION=4.2.2
@@ -19,11 +13,7 @@ ADD https://github.com/topi314/LavaSrc/releases/download/${LAVASRC_VERSION}/lava
 ADD https://github.com/lavalink-devs/youtube-source/releases/download/${YT_VERSION}/youtube-plugin-${YT_VERSION}.jar /app/plugins/youtube-plugin.jar
 
 COPY application.yml /app/
-COPY proxy.js /app/
 
 EXPOSE 2333
 
-# Override Lavalink config to use port 2334 (proxy listens on 2333)
-ENV _JAVA_OPTIONS="-Dserver.port=2334"
-
-CMD node /app/proxy.js & java -jar Lavalink.jar
+CMD java -jar Lavalink.jar

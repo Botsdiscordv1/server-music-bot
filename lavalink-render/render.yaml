@@ -9,4 +9,3 @@ services:
     envVars:
       - key: LAVALINK_PASSWORD
         sync: false
-    healthCheckPath: /
