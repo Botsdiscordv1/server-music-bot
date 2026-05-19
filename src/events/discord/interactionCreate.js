@@ -344,7 +344,6 @@ async function updateNowPlayingButtons(player, client) {
       ? new ButtonBuilder()
           .setCustomId("playback_autoplay")
           .setEmoji("<:autoplay:1505670487806836787>")
-          .setLabel("Autoplay")
           .setStyle(player._autoplayEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
       : null;
 
