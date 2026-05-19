@@ -10,7 +10,7 @@ module.exports = [
       .setName("likes")
       .setDescription("Muestra tus canciones con me gusta."),
     async execute(interaction, client) {
-      const songs = getLikedSongs(interaction.user.id);
+      const songs = await getLikedSongs(interaction.user.id);
       if (songs.length === 0) {
         return interaction.reply({ embeds: [errorEmbed("No tienes canciones con me gusta. Usa el botón ❤️ en el reproductor para añadir.")] });
       }
@@ -65,7 +65,7 @@ module.exports = [
       .addIntegerOption((o) => o.setName("id").setDescription("ID de la canción (usa /likes)").setRequired(true)),
     async execute(interaction, client) {
       const id = interaction.options.getInteger("id");
-      if (removeLikedSong(interaction.user.id, id)) {
+      if (await removeLikedSong(interaction.user.id, id)) {
         return interaction.reply({ embeds: [successEmbed(`Canción #${id} eliminada de Tus Me Gusta.`)] });
       }
       return interaction.reply({ embeds: [errorEmbed("No se encontró esa canción en Tus Me Gusta.")] });

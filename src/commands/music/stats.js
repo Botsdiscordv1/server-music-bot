@@ -19,7 +19,7 @@ module.exports = [
       .addUserOption((o) => o.setName("user").setDescription("Usuario a verificar (opcional)")),
     async execute(interaction, client) {
       const user = interaction.options.getUser("user") || interaction.user;
-      const stats = getUserStats(user.id);
+      const stats = await getUserStats(user.id);
 
       if (!stats) {
         return interaction.reply({ embeds: [errorEmbed("Aun no hay estadísticas para este usuario.")] });
@@ -43,7 +43,7 @@ module.exports = [
       .setName("top-listeners")
       .setDescription("Mostrar los mejores oyentes en este servidor"),
     async execute(interaction, client) {
-      const top = getTopListeners(10);
+      const top = await getTopListeners(10);
 
       if (top.length === 0) {
         return interaction.reply({ embeds: [errorEmbed("Aun no hay estadísticas.")] });

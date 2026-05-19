@@ -10,7 +10,7 @@ module.exports = [
       .addIntegerOption((o) => o.setName("limit").setDescription("Número de canciones (máximo 50)").setMinValue(5).setMaxValue(50)),
     async execute(interaction, client) {
       const limit = interaction.options.getInteger("limit") || 20;
-      const history = getHistory(interaction.guildId, limit);
+      const history = await getHistory(interaction.guildId, limit);
 
       if (history.length === 0) {
         return interaction.reply({ embeds: [errorEmbed("No hay historial de reproducción en este servidor.")] });
@@ -32,7 +32,7 @@ module.exports = [
       .setName("history-clear")
       .setDescription("Borra el historial de reproducción de este servidor."),
     async execute(interaction, client) {
-      clearHistory(interaction.guildId);
+      await clearHistory(interaction.guildId);
       await interaction.reply({ embeds: [{ color: 0x57f287, description: "✅ Historial borrado." }] });
     },
   },

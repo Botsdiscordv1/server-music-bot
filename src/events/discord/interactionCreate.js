@@ -207,7 +207,7 @@ case "playback_lyrics": {
           if (!track) {
             return interaction.reply({ embeds: [errorEmbed("No hay ninguna canción reproduciéndose.")], flags: MessageFlags.Ephemeral });
           }
-          addLikedSong(interaction.user.id, track);
+          await addLikedSong(interaction.user.id, track);
           await interaction.reply({ embeds: [successEmbed(`❤️ **${track.info.title}** añadida a Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
           break;
         }

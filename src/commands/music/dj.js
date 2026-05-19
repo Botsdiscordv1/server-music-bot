@@ -28,11 +28,11 @@ module.exports = {
 
     await interaction.editReply({ embeds: [{ color: 0x1db954, description: "🎧 Generando recomendaciones para ti..." }] });
 
-    const liked = getLikedSongs(interaction.user.id);
-    const stats = getUserStats(interaction.user.id);
+    const liked = await getLikedSongs(interaction.user.id);
+    const stats = await getUserStats(interaction.user.id);
     let seedArtists = [];
 
-    const topArtists = getLikedArtists(interaction.user.id);
+    const topArtists = await getLikedArtists(interaction.user.id);
     if (topArtists.length > 0) {
       try {
         const searchRes = await searchTracks(topArtists[0].artist, 1);

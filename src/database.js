@@ -1,264 +1,228 @@
-const initSqlJs = require("sql.js");
-const fs = require("fs");
-const path = require("path");
+const mongoose = require("mongoose");
 
-const dbPath = path.join(__dirname, "..", "data.db");
-let db;
-let saveTimeout = null;
-let pendingSave = false;
+let dbReady = false;
+const queue = [];
+
+function whenReady(fn) {
+  if (dbReady) return fn();
+  queue.push(fn);
+}
+
+// ── Schemas ──────────────────────────────────────────────────────────
+const userStatsSchema = new mongoose.Schema({
+  userId: { type: String, unique: true, required: true },
+  tracksPlayed: { type: Number, default: 0 },
+  totalListenTime: { type: Number, default: 0 },
+  favoriteArtist: String,
+  lastPlayed: Date,
+}, { timestamps: true });
+
+const playlistSchema = new mongoose.Schema({
+  guildId: { type: String, required: true },
+  userId: { type: String, required: true },
+  name: { type: String, required: true },
+  tracks: { type: Array, default: [] },
+}, { timestamps: true });
+
+const historySchema = new mongoose.Schema({
+  guildId: { type: String, required: true },
+  trackTitle: String,
+  trackAuthor: String,
+  trackUrl: String,
+  trackDuration: Number,
+  playedAt: { type: Date, default: Date.now },
+});
+
+const likedSongSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  trackTitle: String,
+  trackAuthor: String,
+  trackUrl: String,
+  trackDuration: Number,
+  artworkUrl: String,
+  likedAt: { type: Date, default: Date.now },
+});
+
+const UserStats = mongoose.model("UserStats", userStatsSchema);
+const Playlist = mongoose.model("Playlist", playlistSchema);
+const History = mongoose.model("History", historySchema);
+const LikedSong = mongoose.model("LikedSong", likedSongSchema);
 
 async function initDB() {
-  const SQL = await initSqlJs();
-  
-  let data;
-  if (fs.existsSync(dbPath)) {
-    data = fs.readFileSync(dbPath);
-  }
-  
-  db = new SQL.Database(data);
-  
-  db.run(`
-    CREATE TABLE IF NOT EXISTS user_stats (
-      user_id TEXT PRIMARY KEY,
-      tracks_played INTEGER DEFAULT 0,
-      total_listen_time INTEGER DEFAULT 0,
-      favorite_artist TEXT,
-      last_played TEXT
-    )
-  `);
-  
-  db.run(`
-    CREATE TABLE IF NOT EXISTS playlists (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      guild_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      tracks TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  
-  db.run(`
-    CREATE TABLE IF NOT EXISTS history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      guild_id TEXT NOT NULL,
-      track_title TEXT NOT NULL,
-      track_author TEXT,
-      track_url TEXT,
-      track_duration INTEGER,
-      played_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS liked_songs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      track_title TEXT NOT NULL,
-      track_author TEXT,
-      track_url TEXT,
-      track_duration INTEGER,
-      artwork_url TEXT,
-      liked_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(user_id, track_url)
-    )
-  `);
-
-  db.run("CREATE INDEX IF NOT EXISTS idx_liked_user ON liked_songs(user_id)");
-  db.run("CREATE INDEX IF NOT EXISTS idx_history_guild ON history(guild_id)");
-  db.run("CREATE INDEX IF NOT EXISTS idx_playlists_guild ON playlists(guild_id)");
-  db.run("CREATE INDEX IF NOT EXISTS idx_stats_listen ON user_stats(total_listen_time DESC)");
-  
-  saveDB();
-  if (global._dbSaveInterval) clearInterval(global._dbSaveInterval);
-  global._dbSaveInterval = setInterval(() => {
-    if (pendingSave) {
-      try { saveDB(); } catch (e) { console.error("[DB] Save failed:", e.message); }
-      pendingSave = false;
-    }
-  }, 30000);
-  console.log("✅ SQLite database initialized");
+  const uri = process.env.MONGODB_URI || "mongodb://localhost:27017/musicbot";
+  await mongoose.connect(uri);
+  dbReady = true;
+  queue.forEach(fn => fn());
+  queue.length = 0;
+  console.log("✅ MongoDB connected");
 }
 
-function scheduleSave() {
-  pendingSave = true;
+// ── User Stats ─────────────────────────────────────────────────────────
+async function updateUserStats(userId, trackDuration, artist) {
+  await whenReady(() => {});
+  return UserStats.findOneAndUpdate(
+    { userId },
+    {
+      $inc: { tracksPlayed: 1, totalListenTime: trackDuration },
+      $set: { favoriteArtist: artist, lastPlayed: new Date() },
+    },
+    { upsert: true }
+  );
 }
 
-function saveDB() {
-  if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
-  }
+async function getUserStats(userId) {
+  await whenReady(() => {});
+  const doc = await UserStats.findOne({ userId }).lean();
+  if (!doc) return null;
+  return {
+    user_id: doc.userId,
+    tracks_played: doc.tracksPlayed,
+    total_listen_time: doc.totalListenTime,
+    favorite_artist: doc.favoriteArtist,
+    last_played: doc.lastPlayed,
+  };
 }
 
-function updateUserStats(userId, trackDuration, artist) {
-  db.run(`
-    INSERT INTO user_stats (user_id, tracks_played, total_listen_time, favorite_artist, last_played)
-    VALUES (?, 1, ?, ?, datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET
-      tracks_played = tracks_played + 1,
-      total_listen_time = total_listen_time + ?,
-      favorite_artist = ?,
-      last_played = datetime('now')
-  `, [userId, trackDuration, artist, trackDuration, artist]);
-  scheduleSave();
-}
-
-function getUserStats(userId) {
-  const result = db.exec("SELECT * FROM user_stats WHERE user_id = ?", [userId]);
-  if (result.length > 0 && result[0].values.length > 0) {
-    const row = result[0].values[0];
-    return {
-      user_id: row[0],
-      tracks_played: row[1],
-      total_listen_time: row[2],
-      favorite_artist: row[3],
-      last_played: row[4],
-    };
-  }
-  return null;
-}
-
-function getTopListeners(limit = 10) {
-  const result = db.exec(`
-    SELECT user_id, tracks_played, total_listen_time, favorite_artist
-    FROM user_stats
-    ORDER BY total_listen_time DESC
-    LIMIT ?
-  `, [limit]);
-  
-  if (result.length === 0) return [];
-  return result[0].values.map(row => ({
-    user_id: row[0],
-    tracks_played: row[1],
-    total_listen_time: row[2],
-    favorite_artist: row[3],
+async function getTopListeners(limit = 10) {
+  await whenReady(() => {});
+  const docs = await UserStats.find().sort({ totalListenTime: -1 }).limit(limit).lean();
+  return docs.map(doc => ({
+    user_id: doc.userId,
+    tracks_played: doc.tracksPlayed,
+    total_listen_time: doc.totalListenTime,
+    favorite_artist: doc.favoriteArtist,
   }));
 }
 
-function savePlaylist(guildId, userId, name, tracks) {
-  db.run(`
-    INSERT INTO playlists (guild_id, user_id, name, tracks)
-    VALUES (?, ?, ?, ?)
-  `, [guildId, userId, name, JSON.stringify(tracks)]);
-  
-  const result = db.exec("SELECT last_insert_rowid()");
-  scheduleSave();
-  return result[0].values[0][0];
+// ── Playlists ───────────────────────────────────────────────────────────
+async function savePlaylist(guildId, userId, name, tracks) {
+  await whenReady(() => {});
+  const doc = await Playlist.create({ guildId, userId, name, tracks });
+  return doc._id.toString();
 }
 
-function getPlaylist(id, guildId) {
-  const result = db.exec("SELECT * FROM playlists WHERE id = ? AND guild_id = ?", [id, guildId]);
-  if (result.length > 0 && result[0].values.length > 0) {
-    const row = result[0].values[0];
-    return {
-      id: row[0],
-      guild_id: row[1],
-      user_id: row[2],
-      name: row[3],
-      tracks: row[4],
-      created_at: row[5],
-    };
-  }
-  return null;
+async function getPlaylist(index, guildId) {
+  await whenReady(() => {});
+  const docs = await Playlist.find({ guildId }).sort({ createdAt: -1 }).lean();
+  const doc = docs[index - 1];
+  if (!doc) return null;
+  return {
+    id: (index).toString(),
+    guild_id: doc.guildId,
+    user_id: doc.userId,
+    name: doc.name,
+    tracks: JSON.stringify(doc.tracks),
+    created_at: doc.createdAt,
+  };
 }
 
-function getGuildPlaylists(guildId) {
-  const result = db.exec("SELECT * FROM playlists WHERE guild_id = ? ORDER BY created_at DESC", [guildId]);
-  if (result.length === 0) return [];
-  return result[0].values.map(row => ({
-    id: row[0],
-    guild_id: row[1],
-    user_id: row[2],
-    name: row[3],
-    tracks: row[4],
-    created_at: row[5],
+async function getGuildPlaylists(guildId) {
+  await whenReady(() => {});
+  const docs = await Playlist.find({ guildId }).sort({ createdAt: -1 }).lean();
+  return docs.map(doc => ({
+    id: doc._id.toString(),
+    guild_id: doc.guildId,
+    user_id: doc.userId,
+    name: doc.name,
+    tracks: JSON.stringify(doc.tracks),
+    created_at: doc.createdAt,
   }));
 }
 
-function deletePlaylist(id, guildId) {
-  db.run("DELETE FROM playlists WHERE id = ? AND guild_id = ?", [id, guildId]);
-  scheduleSave();
-  return { changes: db.getRowsModified() };
+async function deletePlaylist(index, guildId) {
+  await whenReady(() => {});
+  const docs = await Playlist.find({ guildId }).sort({ createdAt: -1 }).lean();
+  const target = docs[index - 1];
+  if (!target) return { changes: 0 };
+  const res = await Playlist.deleteOne({ _id: target._id });
+  return { changes: res.deletedCount };
 }
 
-function addToHistory(guildId, track) {
-  db.run(`
-    INSERT INTO history (guild_id, track_title, track_author, track_url, track_duration)
-    VALUES (?, ?, ?, ?, ?)
-  `, [guildId, track.info.title, track.info.author, track.info.uri, track.info.duration]);
-  scheduleSave();
+// ── History ──────────────────────────────────────────────────────────────
+async function addToHistory(guildId, track) {
+  await whenReady(() => {});
+  return History.create({
+    guildId,
+    trackTitle: track.info.title,
+    trackAuthor: track.info.author,
+    trackUrl: track.info.uri,
+    trackDuration: track.info.duration,
+  });
 }
 
-function getHistory(guildId, limit = 50) {
-  const result = db.exec(`
-    SELECT * FROM history
-    WHERE guild_id = ?
-    ORDER BY played_at DESC
-    LIMIT ?
-  `, [guildId, limit]);
-  
-  if (result.length === 0) return [];
-  return result[0].values.map(row => ({
-    id: row[0],
-    guild_id: row[1],
-    track_title: row[2],
-    track_author: row[3],
-    track_url: row[4],
-    track_duration: row[5],
-    played_at: row[6],
+async function getHistory(guildId, limit = 50) {
+  await whenReady(() => {});
+  const docs = await History.find({ guildId }).sort({ playedAt: -1 }).limit(limit).lean();
+  return docs.map(doc => ({
+    id: doc._id.toString(),
+    guild_id: doc.guildId,
+    track_title: doc.trackTitle,
+    track_author: doc.trackAuthor,
+    track_url: doc.trackUrl,
+    track_duration: doc.trackDuration,
+    played_at: doc.playedAt,
   }));
 }
 
-function clearHistory(guildId) {
-  db.run("DELETE FROM history WHERE guild_id = ?", [guildId]);
-  saveDB();
-  return { changes: db.getRowsModified() };
+async function clearHistory(guildId) {
+  await whenReady(() => {});
+  const res = await History.deleteMany({ guildId });
+  return { changes: res.deletedCount };
 }
 
-function addLikedSong(userId, track) {
+// ── Liked Songs ─────────────────────────────────────────────────────────
+async function addLikedSong(userId, track) {
+  await whenReady(() => {});
   try {
-    db.run(`
-      INSERT OR IGNORE INTO liked_songs (user_id, track_title, track_author, track_url, track_duration, artwork_url)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [userId, track.info.title, track.info.author, track.info.uri, track.info.duration, track.info.artworkUrl]);
-    scheduleSave();
+    const exists = await LikedSong.findOne({ userId, trackUrl: track.info.uri });
+    if (exists) return false;
+    await LikedSong.create({
+      userId,
+      trackTitle: track.info.title,
+      trackAuthor: track.info.author,
+      trackUrl: track.info.uri,
+      trackDuration: track.info.duration,
+      artworkUrl: track.info.artworkUrl,
+    });
     return true;
   } catch { return false; }
 }
 
-function removeLikedSong(userId, id) {
-  db.run("DELETE FROM liked_songs WHERE id = ? AND user_id = ?", [id, userId]);
-  saveDB();
-  return db.getRowsModified() > 0;
+async function removeLikedSong(userId, id) {
+  await whenReady(() => {});
+  const songs = await LikedSong.find({ userId }).sort({ likedAt: -1 }).lean();
+  const target = songs[id - 1];
+  if (!target) return false;
+  await LikedSong.deleteOne({ _id: target._id });
+  return true;
 }
 
-function getLikedSongs(userId) {
-  const result = db.exec(`
-    SELECT * FROM liked_songs WHERE user_id = ? ORDER BY liked_at DESC
-  `, [userId]);
-  if (result.length === 0) return [];
-  return result[0].values.map(row => ({
-    id: row[0],
-    user_id: row[1],
-    track_title: row[2],
-    track_author: row[3],
-    track_url: row[4],
-    track_duration: row[5],
-    artwork_url: row[6],
-    liked_at: row[7],
+async function getLikedSongs(userId) {
+  await whenReady(() => {});
+  const docs = await LikedSong.find({ userId }).sort({ likedAt: -1 }).lean();
+  return docs.map(doc => ({
+    id: doc._id.toString(),
+    user_id: doc.userId,
+    track_title: doc.trackTitle,
+    track_author: doc.trackAuthor,
+    track_url: doc.trackUrl,
+    track_duration: doc.trackDuration,
+    artwork_url: doc.artworkUrl,
+    liked_at: doc.likedAt,
   }));
 }
 
-function getLikedArtists(userId) {
-  const result = db.exec(`
-    SELECT track_author, COUNT(*) as count FROM liked_songs
-    WHERE user_id = ? AND track_author IS NOT NULL
-    GROUP BY track_author ORDER BY count DESC
-  `, [userId]);
-  if (result.length === 0) return [];
-  return result[0].values.map(row => ({ artist: row[0], count: row[1] }));
+async function getLikedArtists(userId) {
+  await whenReady(() => {});
+  const docs = await LikedSong.find({ userId, trackAuthor: { $ne: null } }).lean();
+  const counts = {};
+  for (const doc of docs) {
+    const artist = doc.trackAuthor;
+    if (artist) counts[artist] = (counts[artist] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([artist, count]) => ({ artist, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 module.exports = {

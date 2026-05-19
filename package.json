@@ -15,6 +15,7 @@
     "discord.js": "^14.15.3",
     "dotenv": "^16.4.5",
     "lavalink-client": "^2.4.0",
+    "mongoose": "^9.6.2",
     "sql.js": "^1.11.0"
   },
   "engines": {

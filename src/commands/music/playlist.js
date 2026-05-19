@@ -23,8 +23,8 @@ module.exports = [
         artwork: t.info.artworkUrl,
       }));
 
-      savePlaylist(interaction.guildId, interaction.user.id, name, tracks);
-      interaction.reply({ embeds: [successEmbed(`Saved playlist **${name}** with ${tracks.length} tracks.`)] });
+      await savePlaylist(interaction.guildId, interaction.user.id, name, tracks);
+      await interaction.reply({ embeds: [successEmbed(`Saved playlist **${name}** with ${tracks.length} tracks.`)] });
     },
   },
   {
@@ -34,7 +34,7 @@ module.exports = [
       .addIntegerOption((o) => o.setName("id").setDescription("ID de la playlist").setRequired(true)),
     async execute(interaction, client) {
       const id = interaction.options.getInteger("id");
-      const playlist = getPlaylist(id, interaction.guildId);
+      const playlist = await getPlaylist(id, interaction.guildId);
 
       if (!playlist) {
         return interaction.reply({ embeds: [errorEmbed("No se encontro la playlist.")] });
@@ -83,7 +83,7 @@ module.exports = [
       .setName("playlist-list")
       .setDescription("Lista de playlists guardadas en este servidor"),
     async execute(interaction, client) {
-      const playlists = getGuildPlaylists(interaction.guildId);
+      const playlists = await getGuildPlaylists(interaction.guildId);
 
       if (playlists.length === 0) {
         return interaction.reply({ embeds: [errorEmbed("No se encontraron playlists guardadas.")] });
@@ -106,7 +106,7 @@ module.exports = [
       .addIntegerOption((o) => o.setName("id").setDescription("ID de la playlist").setRequired(true)),
     async execute(interaction, client) {
       const id = interaction.options.getInteger("id");
-      const result = deletePlaylist(id, interaction.guildId);
+      const result = await deletePlaylist(id, interaction.guildId);
 
       if (result.changes === 0) {
         return interaction.reply({ embeds: [errorEmbed("No se encontro la playlist.")] });
