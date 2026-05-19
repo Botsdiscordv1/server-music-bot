@@ -1,6 +1,5 @@
-const http = require("http");
-
 function keepAlive(node) {
+  const mod = node.options.secure ? require("https") : require("http");
   const opts = {
     hostname: node.options.host,
     port: node.options.port || 2333,
@@ -9,7 +8,7 @@ function keepAlive(node) {
     timeout: 5000,
     headers: { Authorization: node.options.authorization },
   };
-  const req = http.request(opts, (res) => res.resume());
+  const req = mod.request(opts, (res) => res.resume());
   req.on("error", () => {});
   req.end();
 }

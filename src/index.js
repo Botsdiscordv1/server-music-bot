@@ -32,28 +32,14 @@ function testWS(url, headers) {
 const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer((req, res) => {
   if (req.url === "/test-lavalink") {
-    const tests = [];
+    const t = [];
     async function run() {
-      tests.push("=== TEST 1: Lavalink REST ===");
-      try {
-        const r = await fetch(`https://${process.env.LAVALINK_HOST || "localhost"}/v4/info`, { headers: { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass" }, signal: AbortSignal.timeout(10000) });
-        tests.push(`HTTP ${r.status} ${r.ok ? "OK" : "FAIL"}`);
-      } catch (e) { tests.push(`ERROR: ${e.message}`); }
-
-      tests.push("\n=== TEST 2: WebSocket to Lavalink ===");
-      tests.push(await testWS(`ws${process.env.LAVALINK_SECURE === "true" ? "s" : ""}://${process.env.LAVALINK_HOST || "localhost"}:${Number(process.env.LAVALINK_PORT) || 2333}/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
-
-      tests.push("\n=== TEST 3: WebSocket public echo ===");
-      tests.push(await testWS("wss://ws.postman-echo.com/raw"));
-
-      tests.push("\n=== TEST 4: HTTPS google.com ===");
-      try {
-        const r = await fetch("https://google.com", { signal: AbortSignal.timeout(10000) });
-        tests.push(`HTTP ${r.status} ${r.ok ? "OK" : "FAIL"}`);
-      } catch (e) { tests.push(`ERROR: ${e.message}`); }
-
+      t.push("=== REST ===");
+      try { const r = await fetch(`https://${process.env.LAVALINK_HOST || "localhost"}/v4/info`, { headers: { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass" }, signal: AbortSignal.timeout(10000) }); t.push(`HTTP ${r.status}`); } catch (e) { t.push(`ERROR: ${e.message}`); }
+      t.push("\n=== WS ===");
+      t.push(await testWS(`ws${process.env.LAVALINK_SECURE === "true" ? "s" : ""}://${process.env.LAVALINK_HOST || "localhost"}:${Number(process.env.LAVALINK_PORT) || 2333}/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
       res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end(tests.join("\n"));
+      res.end(t.join("\n"));
     }
     run().catch(e => { res.writeHead(500); res.end(e.message); });
     return;
