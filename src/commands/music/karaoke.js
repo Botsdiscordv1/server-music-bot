@@ -50,7 +50,8 @@ async function startKaraoke(interaction, client) {
     const lines = lyrics.synced;
     const initialPosition = getPosition(player);
     const initialEmbed = buildKaraokeEmbed(lines, initialPosition, trackName, artistName, current);
-    const message = await interaction.editReply({ embeds: [initialEmbed], fetchReply: true });
+    await interaction.editReply({ embeds: [initialEmbed] });
+    const message = await interaction.fetchReply();
 
     let lastLineIndex = -1;
 

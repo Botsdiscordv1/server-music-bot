@@ -39,7 +39,8 @@ module.exports = [
         if (currentPage === page && interaction.replied) {
           await interaction.editReply({ embeds: [embed], components: row ? [row] : [] });
         } else {
-          const reply = await interaction.reply({ embeds: [embed], components: row ? [row] : [], fetchReply: true });
+          await interaction.reply({ embeds: [embed], components: row ? [row] : [] });
+          const reply = await interaction.fetchReply();
           if (row) {
             const collector = reply.createMessageComponentCollector({ time: 60000 });
             collector.on("collect", async (btn) => {

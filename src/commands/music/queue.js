@@ -39,11 +39,11 @@ module.exports = {
         .setDisabled(page >= totalPages)
     );
 
-    const reply = await interaction.reply({
+    await interaction.reply({
       embeds: [embed],
       components: totalPages > 1 ? [row] : [],
-      fetchReply: true,
     });
+    const reply = await interaction.fetchReply();
 
     if (totalPages <= 1) return;
 
