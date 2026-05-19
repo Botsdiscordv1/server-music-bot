@@ -9,6 +9,11 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
+const LAVALINK_PORT = Number(process.env.LAVALINK_PORT) || 2333;
+const LAVALINK_SECURE = process.env.LAVALINK_SECURE === "true";
+const LAVALINK_PROTO = LAVALINK_SECURE ? "https" : "http";
+const LAVALINK_WSPROTO = LAVALINK_SECURE ? "wss" : "ws";
+const LAVALINK_AUTH = process.env.LAVALINK_PASSWORD || "youshallnotpass";
 
 const http = require("http");
 const { WebSocket } = require("ws");
@@ -37,13 +42,13 @@ const server = http.createServer((req, res) => {
     const t = [];
     const theDns = require("dns");
     async function run() {
-      t.push(`Host: ${LAVALINK_HOST}`);
+      t.push(`Host: ${LAVALINK_HOST}:${LAVALINK_PORT} (${LAVALINK_PROTO})`);
       t.push("\n=== DNS ===");
       try { const addrs = await theDns.promises.resolve4(LAVALINK_HOST); t.push(addrs.join(", ")); } catch (e) { t.push(`ERROR: ${e.message}`); }
       t.push("\n=== REST ===");
-      try { const r = await fetch(`https://${LAVALINK_HOST}/v4/info`, { headers: { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass" }, signal: AbortSignal.timeout(10000) }); t.push(`HTTP ${r.status}`); } catch (e) { t.push(`ERROR: ${e.message}`); }
+      try { const r = await fetch(`${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/info`, { headers: { Authorization: LAVALINK_AUTH }, signal: AbortSignal.timeout(10000) }); t.push(`HTTP ${r.status}`); } catch (e) { t.push(`ERROR: ${e.message}`); }
       t.push("\n=== WS ===");
-      t.push(await testWS(`wss://${LAVALINK_HOST}/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
+      t.push(await testWS(`${LAVALINK_WSPROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/websocket`, { Authorization: LAVALINK_AUTH, "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end(t.join("\n"));
     }
