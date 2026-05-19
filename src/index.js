@@ -9,22 +9,6 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
-const dns = require("dns");
-const originalLookup = dns.lookup;
-dns.lookup = function (hostname, options, callback) {
-  if (typeof options === "function") { callback = options; options = {}; }
-  if (hostname === LAVALINK_HOST) {
-    const resolver = new dns.Resolver();
-    resolver.setServers(["8.8.8.8"]);
-    resolver.resolve4(hostname, (err, addresses) => {
-      if (err || !addresses?.length) return originalLookup(hostname, options, callback);
-      const family = options?.family === 6 ? 6 : 4;
-      callback(null, addresses[0], family);
-    });
-    return { cancel() {} };
-  }
-  return originalLookup(hostname, options, callback);
-};
 
 const http = require("http");
 const { WebSocket } = require("ws");

@@ -13,8 +13,9 @@ module.exports = {
             const req = https.request({ hostname: h, port: p, path: "/v4/info", method: "GET", timeout: 5000, headers: { Authorization: auth } }, resolve);
             req.on("error", reject); req.end();
           });
+          console.log(`   Warm attempt ${i + 1}: HTTP ${r.statusCode}`);
           if (r.statusCode !== 404) { console.log(`✅ Lavalink warm (HTTP ${r.statusCode})`); return; }
-        } catch {}
+        } catch { console.log(`   Warm attempt ${i + 1}: connection failed`); }
         await new Promise((r) => setTimeout(r, 3000));
       }
       console.warn("⚠️ Lavalink warm failed (still 404 after 60s)");
