@@ -39,10 +39,7 @@ async function refillQueue(player, client) {
     }
 
     if (seeds.length === 0) {
-      if (player.queue.tracks.length === 0) {
-        await player.stop();
-        player._djMode = false;
-      }
+      if (player.queue.tracks.length === 0) player._djMode = false;
       return;
     }
 
@@ -57,15 +54,9 @@ async function refillQueue(player, client) {
       if (player.queue.tracks.length >= 20) break;
     }
 
-    if (player.queue.tracks.length === 0) {
-      await player.stop();
-      player._djMode = false;
-    }
+    if (player.queue.tracks.length === 0) player._djMode = false;
   } catch {
-    if (player.queue.tracks.length === 0) {
-      await player.stop();
-      player._djMode = false;
-    }
+    if (player.queue.tracks.length === 0) player._djMode = false;
   } finally {
     player._djRefilling = false;
   }
@@ -119,8 +110,8 @@ module.exports = {
 
     if (!player.connected) await player.connect();
 
-    player.queue.clear();
-    await player.stop();
+    await player.queue.splice(0, player.queue.tracks.length);
+    await player.stopPlaying();
 
     await initDJ(player, interaction.user.id);
 
