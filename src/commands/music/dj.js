@@ -94,45 +94,59 @@ module.exports = {
     .setDescription("Modo DJ — radio infinita con recomendaciones que aprenden de tus gustos."),
 
   async execute(interaction, client) {
-    await interaction.deferReply();
-
-    const voiceChannel = await requireVoiceChannel(interaction);
-    if (!voiceChannel) return;
-
-    const player = client.lavalink.getPlayer(interaction.guildId) ||
-      await client.lavalink.createPlayer({
-        guildId: interaction.guildId,
-        voiceChannelId: voiceChannel.id,
-        textChannelId: interaction.channelId,
-        selfDeaf: true,
-        volume: 100,
-      });
-
-    if (!player.connected) await player.connect();
-
-    await player.queue.splice(0, player.queue.tracks.length);
-    await player.stopPlaying();
-
-    await initDJ(player, interaction.user.id);
-
-    if (player.queue.tracks.length === 0) {
-      return interaction.editReply({ embeds: [errorEmbed("No se pudieron generar recomendaciones. Agrega canciones a ❤️ Tus Me Gusta primero.")] });
+    try {
+      await interaction.deferReply();
+    } catch (e) {
+      return console.error("[DJ] deferReply failed:", e.message);
     }
 
-    await player.play({ paused: false });
-    player._trackStartTime = Date.now();
+    try {
+      const voiceChannel = await requireVoiceChannel(interaction);
+      if (!voiceChannel) return;
 
-    const embed = new (require("discord.js").EmbedBuilder)()
-      .setColor(0x1db954)
-      .setAuthor({ name: "🎧 Modo DJ Activado" })
-      .setDescription(
-        `Radio infinita basada en tus gustos.\n` +
-        `Seed tracks: ${player._djPositiveSeeds.length} canciones · ` +
-        `Cola: ${player.queue.tracks.length} tracks`
-      )
-      .setFooter({ text: "Powered by Spotify Web API" });
+      const player = client.lavalink.getPlayer(interaction.guildId) ||
+        await client.lavalink.createPlayer({
+          guildId: interaction.guildId,
+          voiceChannelId: voiceChannel.id,
+          textChannelId: interaction.channelId,
+          selfDeaf: true,
+          volume: 100,
+        });
 
-    await interaction.editReply({ embeds: [embed] });
+      if (!player.connected) await player.connect();
+
+      if (typeof player.queue.splice === "function") {
+        await player.queue.splice(0, player.queue.tracks.length);
+      } else if (typeof player.queue.clear === "function") {
+        player.queue.clear();
+      }
+
+      if (typeof player.stopPlaying === "function") await player.stopPlaying();
+
+      await initDJ(player, interaction.user.id);
+
+      if (player.queue.tracks.length === 0) {
+        return interaction.editReply({ embeds: [errorEmbed("No se pudieron generar recomendaciones. Agrega canciones a ❤️ Tus Me Gusta primero.")] });
+      }
+
+      await player.play({ paused: false });
+      player._trackStartTime = Date.now();
+
+      const embed = new (require("discord.js").EmbedBuilder)()
+        .setColor(0x1db954)
+        .setAuthor({ name: "🎧 Modo DJ Activado" })
+        .setDescription(
+          `Radio infinita basada en tus gustos.\n` +
+          `Seed tracks: ${player._djPositiveSeeds.length} canciones · ` +
+          `Cola: ${player.queue.tracks.length} tracks`
+        )
+        .setFooter({ text: "Powered by Spotify Web API" });
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (e) {
+      console.error("[DJ] Error:", e);
+      try { await interaction.editReply({ embeds: [errorEmbed(`Error: ${e.message}`)] }); } catch {}
+    }
   },
 };
 
