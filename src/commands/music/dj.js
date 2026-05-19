@@ -41,10 +41,15 @@ module.exports = {
     }
 
     let seedTracks = [];
-    if (liked.length > 0) {
-      for (const s of liked.slice(0, 3)) {
-        const match = s.track_url?.match(/track\/([A-Za-z0-9]+)/) || s.track_url?.match(/spotify:track:([A-Za-z0-9]+)/);
-        if (match) seedTracks.push(match[1]);
+    for (const s of liked.slice(0, 3)) {
+      let match = s.track_url?.match(/track\/([A-Za-z0-9]+)/) || s.track_url?.match(/spotify:track:([A-Za-z0-9]+)/);
+      if (match) {
+        seedTracks.push(match[1]);
+      } else if (s.track_author && s.track_title) {
+        try {
+          const searchRes = await searchTracks(`${s.track_author} - ${s.track_title}`, 1);
+          if (searchRes[0]?.id) seedTracks.push(searchRes[0].id);
+        } catch {}
       }
     }
 
