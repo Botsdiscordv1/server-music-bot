@@ -25,25 +25,36 @@ module.exports = {
     if (!client?.lavalink?.players) return;
     for (const [, player] of client.lavalink.players) {
       if (player.node.id !== node.id) continue;
-      if (player.voiceChannelId && !player.connected) {
-        player.connect().catch(() => {});
-      }
-      if (!player.playing && !player.paused) {
-        if (player.queue.current) {
-          player.play({ paused: false }).catch(() => {});
-        } else if (player.queue.previous?.length > 0) {
-          const last = player.queue.previous[player.queue.previous.length - 1];
-          player.queue.add(last);
-          player.play({ paused: false }).catch(() => {});
-        } else if (player._autoplayEnabled) {
-          const { getAutoplayTrack } = require("../../services/autoplay");
-          getAutoplayTrack(player, player.queue.previous?.[0] || { info: {} }).then((result) => {
-            if (result) {
-              player.queue.add(result.track);
+      
+      if (player.voiceChannelId) {
+        console.log(`[Lavalink Reconnect] Re-establishing voice connection for guild: ${player.guildId}`);
+        player.connect().catch((err) => console.error(`[Lavalink Reconnect] connect() failed:`, err.message));
+
+        // Wait 1 second to allow Discord voice server update handshake to complete before playing
+        setTimeout(() => {
+          if (player.queue.current) {
+            const currentPos = player.position || 0;
+            console.log(`[Lavalink Reconnect] Restoring track playback for "${player.queue.current.info.title}" at ${currentPos}ms`);
+            player.play({
+              startTime: currentPos,
+              paused: player.paused
+            }).catch((err) => console.error(`[Lavalink Reconnect] Failed to resume track:`, err.message));
+          } else {
+            if (player.queue.previous?.length > 0) {
+              const last = player.queue.previous[player.queue.previous.length - 1];
+              player.queue.add(last);
               player.play({ paused: false }).catch(() => {});
+            } else if (player._autoplayEnabled) {
+              const { getAutoplayTrack } = require("../../services/autoplay");
+              getAutoplayTrack(player, player.queue.previous?.[0] || { info: {} }).then((result) => {
+                if (result) {
+                  player.queue.add(result.track);
+                  player.play({ paused: false }).catch(() => {});
+                }
+              }).catch(() => {});
             }
-          }).catch(() => {});
-        }
+          }
+        }, 1000);
       }
     }
   },
