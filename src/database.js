@@ -43,10 +43,24 @@ const likedSongSchema = new mongoose.Schema({
   likedAt: { type: Date, default: Date.now },
 });
 
+const trackPlaySchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  trackTitle: String,
+  trackAuthor: String,
+  trackUrl: String,
+  playCount: { type: Number, default: 1 },
+});
+trackPlaySchema.index({ userId: 1, trackUrl: 1 }, { unique: true });
+
+function cleanAuthor(author) {
+  return (author || "").replace(/\s*-\s*Topic$/i, "").trim();
+}
+
 const UserStats = mongoose.model("UserStats", userStatsSchema);
 const Playlist = mongoose.model("Playlist", playlistSchema);
 const History = mongoose.model("History", historySchema);
 const LikedSong = mongoose.model("LikedSong", likedSongSchema);
+const TrackPlay = mongoose.model("TrackPlay", trackPlaySchema);
 
 async function initDB() {
   const uri = process.env.MONGODB_URI || "mongodb://localhost:27017/musicbot";
@@ -64,7 +78,7 @@ async function updateUserStats(userId, trackDuration, artist) {
     { userId },
     {
       $inc: { tracksPlayed: 1, totalListenTime: trackDuration },
-      $set: { favoriteArtist: artist, lastPlayed: new Date() },
+      $set: { favoriteArtist: cleanAuthor(artist), lastPlayed: new Date() },
     },
     { upsert: true }
   );
@@ -144,7 +158,7 @@ async function addToHistory(guildId, track) {
   return History.create({
     guildId,
     trackTitle: track.info.title,
-    trackAuthor: track.info.author,
+    trackAuthor: cleanAuthor(track.info.author),
     trackUrl: track.info.uri,
     trackDuration: track.info.duration,
   });
@@ -179,7 +193,7 @@ async function addLikedSong(userId, track) {
     await LikedSong.create({
       userId,
       trackTitle: track.info.title,
-      trackAuthor: track.info.author,
+      trackAuthor: cleanAuthor(track.info.author),
       trackUrl: track.info.uri,
       trackDuration: track.info.duration,
       artworkUrl: track.info.artworkUrl,
@@ -192,9 +206,9 @@ async function removeLikedSong(userId, id) {
   await whenReady(() => {});
   const songs = await LikedSong.find({ userId }).sort({ likedAt: -1 }).lean();
   const target = songs[id - 1];
-  if (!target) return false;
+  if (!target) return null;
   await LikedSong.deleteOne({ _id: target._id });
-  return true;
+  return target;
 }
 
 async function getLikedSongs(userId) {
@@ -225,6 +239,78 @@ async function getLikedArtists(userId) {
     .sort((a, b) => b.count - a.count);
 }
 
+async function incrementTrackPlay(userId, trackTitle, trackAuthor, trackUrl) {
+  await whenReady(() => {});
+  return TrackPlay.findOneAndUpdate(
+    { userId, trackUrl },
+    { $inc: { playCount: 1 }, $set: { trackTitle, trackAuthor: cleanAuthor(trackAuthor) } },
+    { upsert: true }
+  );
+}
+
+async function getMostPlayedTracks(userId, limit = 10) {
+  await whenReady(() => {});
+  const docs = await TrackPlay.find({ userId }).sort({ playCount: -1 }).limit(limit).lean();
+  return docs.map(doc => ({
+    track_title: doc.trackTitle,
+    track_author: doc.trackAuthor,
+    track_url: doc.trackUrl,
+    play_count: doc.playCount,
+  }));
+}
+
+async function copyLikedSongs(fromUserId, toUserId) {
+  await whenReady(() => {});
+  const sourceSongs = await LikedSong.find({ userId: fromUserId }).lean();
+  if (sourceSongs.length === 0) return { copied: 0, skipped: 0, total: 0 };
+
+  let copied = 0;
+  let skipped = 0;
+  for (const song of sourceSongs) {
+    const exists = await LikedSong.findOne({ userId: toUserId, trackUrl: song.trackUrl });
+    if (!exists) {
+      await LikedSong.create({
+        userId: toUserId,
+        trackTitle: song.trackTitle,
+        trackAuthor: song.trackAuthor,
+        trackUrl: song.trackUrl,
+        trackDuration: song.trackDuration,
+        artworkUrl: song.artworkUrl,
+      });
+      copied++;
+    } else {
+      skipped++;
+    }
+  }
+  return { copied, skipped, total: sourceSongs.length };
+}
+
+async function copyPlaylist(guildId, fromUserId, toUserId, playlistName) {
+  await whenReady(() => {});
+  const playlist = await Playlist.findOne({ guildId, userId: fromUserId, name: playlistName }).lean();
+  if (!playlist) return null;
+
+  let targetName = playlist.name;
+  const exists = await Playlist.findOne({ guildId, userId: toUserId, name: targetName });
+  if (exists) {
+    targetName = `${playlist.name} (Copy)`;
+  }
+
+  await Playlist.create({
+    guildId,
+    userId: toUserId,
+    name: targetName,
+    tracks: playlist.tracks,
+  });
+
+  return { name: targetName, trackCount: playlist.tracks.length };
+}
+
+async function getUserPlaylists(guildId, userId) {
+  await whenReady(() => {});
+  return Playlist.find({ guildId, userId }).sort({ name: 1 }).lean();
+}
+
 module.exports = {
   initDB,
   updateUserStats,
@@ -241,4 +327,10 @@ module.exports = {
   removeLikedSong,
   getLikedSongs,
   getLikedArtists,
+  incrementTrackPlay,
+  getMostPlayedTracks,
+  copyLikedSongs,
+  copyPlaylist,
+  getUserPlaylists,
 };
+

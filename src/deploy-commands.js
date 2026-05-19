@@ -3,7 +3,7 @@ const { REST, Routes } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
-const PROFILE_COMMANDS = ["play", "skip", "stop", "karaoke", "lyrics", "filter"];
+const PROFILE_COMMANDS = ["play", "skip", "stop", "lyrics", "filter", "farm"];
 
 const allCommands = [];
 const foldersPath = path.join(__dirname, "commands");
@@ -31,13 +31,6 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    const guildId = process.env.GUILD_ID;
-
-    if (!guildId) {
-      console.error("❌ GUILD_ID is required for hybrid deploy");
-      process.exit(1);
-    }
-
     // Clear old global commands
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
     console.log("🧹 Cleared old global commands");
@@ -46,9 +39,11 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN);
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: globalCommands });
     console.log(`✅ ${globalCommands.length} commands deployed globally (profile): ${globalCommands.map(c => c.name).join(", ")}`);
 
-    // Deploy rest to guild
-    await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId), { body: guildCommands });
-    console.log(`✅ ${guildCommands.length} guild commands deployed to ${guildId}`);
+    const guildId = process.env.GUILD_ID;
+    if (guildId && guildCommands.length) {
+      await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId), { body: guildCommands });
+      console.log(`✅ ${guildCommands.length} guild commands deployed to ${guildId}`);
+    }
 
     console.log("🎉 Hybrid deploy complete");
   } catch (err) {

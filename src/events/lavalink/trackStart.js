@@ -1,7 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const { nowPlayingEmbed } = require("../../utils/embeds");
 const { getLyrics } = require("../../services/lrclib");
-const { updateUserStats, addToHistory } = require("../../database");
+const { updateUserStats, addToHistory, incrementTrackPlay, getLikedSongs } = require("../../database");
 
 
 module.exports = {
@@ -24,7 +24,7 @@ module.exports = {
     if (!channel) return;
 
     try {
-      // ── Row 1: Playback controls ──────────────────────────────────────────
+      // ── Buttons definition ────────────────────────────────────────────────
       const backBtn = new ButtonBuilder()
         .setCustomId("playback_back")
         .setEmoji("<:back:1504762230250410134>")
@@ -33,7 +33,7 @@ module.exports = {
       const pauseBtn = new ButtonBuilder()
         .setCustomId("playback_pause")
         .setEmoji("<:pausa:1504760177348313108>")
-        .setStyle(ButtonStyle.Danger);
+        .setStyle(ButtonStyle.Secondary);
 
       const skipBtn = new ButtonBuilder()
         .setCustomId("playback_skip")
@@ -45,32 +45,70 @@ module.exports = {
         .setEmoji("<:stop:1504789139311169721>")
         .setStyle(ButtonStyle.Secondary);
 
-      const likeBtn = new ButtonBuilder()
-        .setCustomId("playback_like")
-        .setEmoji("🤍")
-        .setStyle(ButtonStyle.Secondary);
+      const randomBtn = new ButtonBuilder()
+        .setCustomId("playback_random")
+        .setEmoji("<:random:1504767140228632607>")
+        .setStyle(player._shuffleEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
 
-      const row = new ActionRowBuilder().addComponents(backBtn, pauseBtn, skipBtn, stopBtn, likeBtn);
+      // Load liked URLs for current requester (reload if requester changed)
+      const targetUserId = (track.requester?.id && track.requester.id !== "dj")
+        ? track.requester.id
+        : player.requesterId;
 
-      // ── Row 2: Queue + Autoplay + Random + optional LSync/Lyrics ────────
+      if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedUrls)) {
+        try {
+          const liked = await getLikedSongs(targetUserId);
+          player._djLikedUrls = new Set(liked.map(s => s.track_url).filter(Boolean));
+          player._djLikedOwner = targetUserId;
+        } catch {}
+      }
+      const trackLiked = player._djLikedUrls?.has(track.info?.uri);
+
+      // ── Row 1 setup ───────────────────────────────────────────────────────
+      const rowComp = [backBtn, pauseBtn, skipBtn, stopBtn];
+      if (!trackLiked) {
+        rowComp.push(new ButtonBuilder()
+          .setCustomId("playback_like")
+          .setEmoji("🤍")
+          .setStyle(ButtonStyle.Secondary)
+        );
+      } else {
+        rowComp.push(randomBtn);
+      }
+      const row = new ActionRowBuilder().addComponents(rowComp);
+
+      // ── Row 2 setup ───────────────────────────────────────────────────────
       const queueBtn = new ButtonBuilder()
         .setCustomId("playback_queue")
         .setEmoji("<:lista:1504760412221079553>")
         .setLabel("List")
         .setStyle(ButtonStyle.Secondary);
 
-      const autoplayBtn = new ButtonBuilder()
-        .setCustomId("playback_autoplay")
-        .setEmoji("<:autoplay:1505670487806836787>")
-        .setLabel("Autoplay")
-        .setStyle(player._autoplayEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
+      const isLiked = player._djLikedUrls?.has(track.info?.uri);
+      const showDislike = player._djMode && !isLiked;
+      const centerBtn = showDislike
+        ? new ButtonBuilder()
+            .setCustomId("playback_dislike")
+            .setEmoji("<:dislike:1506181210660012122>")
+            .setStyle(ButtonStyle.Secondary)
+        : !player._djMode
+          ? new ButtonBuilder()
+              .setCustomId("playback_autoplay")
+              .setEmoji("<:autoplay:1505670487806836787>")
+              .setLabel("Autoplay")
+              .setStyle(player._autoplayEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+          : null;
 
-      const randomBtn = new ButtonBuilder()
-        .setCustomId("playback_random")
-        .setEmoji("<:random:1504767140228632607>")
-        .setStyle(player._shuffleEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
+      const row2Components = [];
+      if (!trackLiked) {
+        row2Components.push(randomBtn);
+      }
+      if (centerBtn) {
+        row2Components.push(centerBtn);
+      }
+      row2Components.push(queueBtn);
 
-      const row2 = new ActionRowBuilder().addComponents(randomBtn, autoplayBtn, queueBtn);
+      const row2 = new ActionRowBuilder().addComponents(row2Components);
 
       if (player.nowPlayingMessage) {
         player.nowPlayingMessage.delete().catch(() => {});
@@ -128,12 +166,13 @@ module.exports = {
           }
 
           if (lyricsCheck.found) {
-            const searched = track.info.title.toLowerCase().replace(/[^a-z0-9\s]/g, "");
-            const searchedArtist = cleanAuthor.toLowerCase().replace(/[^a-z0-9\s]/g, "");
-            const resultName = (lyricsCheck.trackName || "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
-            const resultArtist = (lyricsCheck.artistName || "").toLowerCase().replace(/[^a-z0-9\s]/g, "");
+            const stripExtras = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/(feat|ft)\s+\w+/g, "").replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+            const searched = stripExtras(track.info.title);
+            const searchedArtist = stripExtras(cleanAuthor);
+            const resultName = stripExtras(lyricsCheck.trackName || "");
+            const resultArtist = stripExtras(lyricsCheck.artistName || "");
 
-            const titleMatch = resultName.includes(searched.slice(0, 20)) || searched.includes(resultName);
+            const titleMatch = resultName.includes(searched) || searched.includes(resultName);
             const artistMatch = !searchedArtist || !resultArtist || resultArtist.includes(searchedArtist) || searchedArtist.includes(resultArtist);
 
             if (!titleMatch || !artistMatch) {
@@ -150,7 +189,15 @@ module.exports = {
           player._lyricsCache = hasLyrics ? lyricsCheck : null;
           
           if (player.nowPlayingMessage?.editable && (player._lyricsAvailable || player._lsyncAvailable)) {
-            let newRow2 = new ActionRowBuilder().addComponents(randomBtn, autoplayBtn, queueBtn);
+            const row2Comp = [];
+            if (!trackLiked) {
+              row2Comp.push(randomBtn);
+            }
+            if (centerBtn) {
+              row2Comp.push(centerBtn);
+            }
+            row2Comp.push(queueBtn);
+            let newRow2 = new ActionRowBuilder().addComponents(row2Comp);
             if (player._lyricsAvailable) {
               newRow2.addComponents(
                 new ButtonBuilder()
@@ -194,9 +241,23 @@ module.exports = {
         } catch (e) {}
       };
 
+      const trackPlay = async () => {
+        try {
+          if (track.requester?.id) {
+            await incrementTrackPlay(
+              track.requester.id,
+              track.info.title,
+              track.info.author,
+              track.info.uri
+            );
+          }
+        } catch (e) {}
+      };
+
       searchLyrics();
       updateStats();
       addHistory();
+      trackPlay();
     } catch (err) {
       console.error("[TrackStart] Error:", err.message);
     }

@@ -220,12 +220,13 @@ module.exports = {
 
       for (const entry of allTracks.slice(0, 25)) {
         const t = entry.track;
-        const displayTitle = t.info.title.length > 50 ? t.info.title.substring(0, 47) + "..." : t.info.title;
-        const displayAuthor = t.info.author.length > 20 ? t.info.author.substring(0, 17) + "..." : t.info.author;
+        const prefix = entry.source === "ytm" ? "🎵" : "🎬";
+        const displayTitle = t.info.title.length > 45 ? t.info.title.substring(0, 42) + "..." : t.info.title;
+        const displayAuthor = t.info.author.length > 18 ? t.info.author.substring(0, 15) + "..." : t.info.author;
         const duration = t.info.isStream ? "Live" : `${Math.floor(t.info.duration / 60000)}:${Math.floor((t.info.duration % 60000) / 1000).toString().padStart(2, '0')}`;
 
         choices.push({
-          name: `🎵 ${displayTitle} - ${displayAuthor} - ${duration}`,
+          name: `${prefix} ${displayTitle} - ${displayAuthor} - ${duration}`,
           value: vid(entry),
         });
       }

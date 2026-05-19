@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const { getLikedSongs, removeLikedSong } = require("../../database");
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
+const { getLikedSongs, removeLikedSong, copyLikedSongs } = require("../../database");
 const { errorEmbed, successEmbed } = require("../../utils/embeds");
 
 const ITEMS_PER_PAGE = 10;
@@ -12,7 +12,7 @@ module.exports = [
     async execute(interaction, client) {
       const songs = await getLikedSongs(interaction.user.id);
       if (songs.length === 0) {
-        return interaction.reply({ embeds: [errorEmbed("No tienes canciones con me gusta. Usa el botón ❤️ en el reproductor para añadir.")] });
+        return interaction.reply({ embeds: [errorEmbed("No tienes canciones con me gusta. Usa el botón ❤️ en el reproductor para añadir.")], flags: MessageFlags.Ephemeral });
       }
 
       const totalPages = Math.ceil(songs.length / ITEMS_PER_PAGE);
@@ -39,7 +39,7 @@ module.exports = [
         if (currentPage === page && interaction.replied) {
           await interaction.editReply({ embeds: [embed], components: row ? [row] : [] });
         } else {
-          await interaction.reply({ embeds: [embed], components: row ? [row] : [] });
+          await interaction.reply({ embeds: [embed], components: row ? [row] : [], flags: MessageFlags.Ephemeral });
           const reply = await interaction.fetchReply();
           if (row) {
             const collector = reply.createMessageComponentCollector({ time: 60000 });
@@ -66,10 +66,58 @@ module.exports = [
       .addIntegerOption((o) => o.setName("id").setDescription("ID de la canción (usa /likes)").setRequired(true)),
     async execute(interaction, client) {
       const id = interaction.options.getInteger("id");
-      if (await removeLikedSong(interaction.user.id, id)) {
-        return interaction.reply({ embeds: [successEmbed(`Canción #${id} eliminada de Tus Me Gusta.`)] });
+      const removed = await removeLikedSong(interaction.user.id, id);
+      if (removed) {
+        return interaction.reply({ 
+          embeds: [successEmbed(`❌ **${removed.trackTitle}** — ${removed.trackAuthor || "Desconocido"} eliminada de Tus Me Gusta.`)], 
+          flags: MessageFlags.Ephemeral 
+        });
       }
-      return interaction.reply({ embeds: [errorEmbed("No se encontró esa canción en Tus Me Gusta.")] });
+      return interaction.reply({ embeds: [errorEmbed("No se encontró esa canción en Tus Me Gusta.")], flags: MessageFlags.Ephemeral });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("like-copy")
+      .setDescription("Copia la lista de Tus Me Gusta de otro usuario a tu lista.")
+      .addUserOption((o) =>
+        o
+          .setName("user")
+          .setDescription("El usuario del que quieres copiar la lista")
+          .setRequired(true)
+      ),
+    async execute(interaction, client) {
+      const fromUser = interaction.options.getUser("user");
+      const toUserId = interaction.user.id;
+
+      if (fromUser.id === toUserId) {
+        return interaction.reply({
+          embeds: [errorEmbed("No puedes copiar tu propia lista de Me Gusta.")],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      try {
+        const result = await copyLikedSongs(fromUser.id, toUserId);
+        if (result.total === 0) {
+          return interaction.editReply({
+            embeds: [errorEmbed(`El usuario <@${fromUser.id}> no tiene canciones en Tus Me Gusta.`)]
+          });
+        }
+
+        const embed = successEmbed(
+          `Copiadas **${result.copied}** canciones de <@${fromUser.id}>.\n` +
+          `*(Se omitieron ${result.skipped} canciones duplicadas)*`
+        );
+        return interaction.editReply({ embeds: [embed] });
+      } catch (err) {
+        console.error("[LikeCopy] Error:", err);
+        return interaction.editReply({
+          embeds: [errorEmbed("Ocurrió un error al copiar las canciones.")]
+        });
+      }
     },
   },
 ];

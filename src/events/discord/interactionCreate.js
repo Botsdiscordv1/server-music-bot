@@ -4,7 +4,7 @@ const { getLyrics, formatLyricsForEmbed } = require("../../services/lrclib");
 const { startKaraoke } = require("../../commands/music/karaoke");
 const searchCommand = require("../../commands/music/search");
 const { addLikedSong } = require("../../database");
-const { getSpotifyId } = require("../../commands/music/dj");
+const { getTrackKey } = require("../../commands/music/dj");
 const { getAutoplayTrack } = require("../../services/autoplay");
 
 module.exports = {
@@ -123,10 +123,10 @@ async function handlePlaybackButton(interaction, client) {
       case "playback_skip": {
         await interaction.deferUpdate();
         if (player._djMode && player.queue.current) {
-          const id = await getSpotifyId(player.queue.current);
-          if (id) {
-            player._djNegativeSeeds = [...(player._djNegativeSeeds || []), id].slice(-10);
-            player._djPositiveSeeds = (player._djPositiveSeeds || []).filter(s => s !== id);
+          const key = getTrackKey(player.queue.current);
+          if (key) {
+            player._djNegativeSeeds = [...(player._djNegativeSeeds || []), key].slice(-10);
+            player._djPositiveSeeds = (player._djPositiveSeeds || []).filter(s => s.key !== key);
           }
         }
         if (player.queue.tracks.length > 0) {
@@ -137,6 +137,22 @@ async function handlePlaybackButton(interaction, client) {
             player.queue.add(result.track);
             await player.skip();
           }
+        }
+        break;
+      }
+      case "playback_dislike": {
+        await interaction.deferUpdate();
+        if (player.queue.current) {
+          const key = getTrackKey(player.queue.current);
+          if (key) {
+            player._djNegativeSeeds = [...(player._djNegativeSeeds || []), key].slice(-10);
+            player._djPositiveSeeds = (player._djPositiveSeeds || []).filter(s => s.key !== key);
+            if (player._djPlayedIds) player._djPlayedIds.delete(player.queue.current.info?.identifier);
+            if (player._djPlayedTitles) player._djPlayedTitles.delete(player.queue.current.info?.title?.toLowerCase());
+          }
+        }
+        if (player.queue.tracks.length > 0) {
+          await player.skip();
         }
         break;
       }
@@ -217,12 +233,25 @@ case "playback_lyrics": {
           }
           await addLikedSong(interaction.user.id, track);
           if (player._djMode) {
-            const id = await getSpotifyId(track);
-            if (id && !(player._djPositiveSeeds || []).includes(id)) {
-              player._djPositiveSeeds = [...(player._djPositiveSeeds || []), id].slice(-10);
+            const key = getTrackKey(track);
+            if (key && !(player._djPositiveSeeds || []).some(s => s.key === key)) {
+              const author = track.info?.author || "";
+              const title = track.info?.title || "";
+              player._djPositiveSeeds = [...(player._djPositiveSeeds || []), { key, title, author }].slice(-10);
             }
           }
+
+          const targetUserId = (track.requester?.id && track.requester.id !== "dj")
+            ? track.requester.id
+            : player.requesterId;
+
+          if (interaction.user.id === targetUserId) {
+            if (!player._djLikedUrls) player._djLikedUrls = new Set();
+            player._djLikedUrls.add(track.info.uri);
+          }
+
           await interaction.reply({ embeds: [successEmbed(`❤️ **${track.info.title}** añadida a Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
+          await updateNowPlayingButtons(player, client);
           break;
         }
        }
@@ -245,7 +274,7 @@ async function updateNowPlayingButtons(player, client) {
   const pauseBtn = new ButtonBuilder()
     .setCustomId("playback_pause")
     .setEmoji(player.paused ? "<:reproducir:1504760122285625444>" : "<:pausa:1504760177348313108>")
-    .setStyle(player.paused ? ButtonStyle.Success : ButtonStyle.Danger);
+    .setStyle(player.paused ? ButtonStyle.Success : ButtonStyle.Secondary);
 
   const skipBtn = new ButtonBuilder()
     .setCustomId("playback_skip")
@@ -257,32 +286,70 @@ async function updateNowPlayingButtons(player, client) {
     .setEmoji("<:stop:1504789139311169721>")
     .setStyle(ButtonStyle.Secondary);
 
-  const likeBtn = new ButtonBuilder()
-    .setCustomId("playback_like")
-    .setEmoji("🤍")
-    .setStyle(ButtonStyle.Secondary);
+  const track = player.queue.current;
+  const targetUserId = (track?.requester?.id && track.requester.id !== "dj")
+    ? track.requester.id
+    : player.requesterId;
 
-  const row = new ActionRowBuilder().addComponents(backBtn, pauseBtn, skipBtn, stopBtn, likeBtn);
-
-  // ── Row 2: Queue + Autoplay + Random + optional Lyrics/LSync ─────────
-  const queueBtn = new ButtonBuilder()
-    .setCustomId("playback_queue")
-    .setEmoji("<:lista:1504760412221079553>")
-        .setLabel("List")
-    .setStyle(ButtonStyle.Secondary);
-
-  const autoplayBtn = new ButtonBuilder()
-    .setCustomId("playback_autoplay")
-    .setEmoji("<:autoplay:1505670487806836787>")
-    .setLabel("Autoplay")
-    .setStyle(player._autoplayEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
+  if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedUrls)) {
+    try {
+      const { getLikedSongs } = require("../../database");
+      const liked = await getLikedSongs(targetUserId);
+      player._djLikedUrls = new Set(liked.map(s => s.track_url).filter(Boolean));
+      player._djLikedOwner = targetUserId;
+    } catch {}
+  }
+  const trackLiked = player._djLikedUrls?.has(track?.info?.uri);
 
   const randomBtn = new ButtonBuilder()
     .setCustomId("playback_random")
     .setEmoji("<:random:1504767140228632607>")
     .setStyle(player._shuffleEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
 
-  const row2 = new ActionRowBuilder().addComponents(randomBtn, autoplayBtn, queueBtn);
+  const rowComp = [backBtn, pauseBtn, skipBtn, stopBtn];
+  if (!trackLiked) {
+    rowComp.push(new ButtonBuilder()
+      .setCustomId("playback_like")
+      .setEmoji("🤍")
+      .setStyle(ButtonStyle.Secondary)
+    );
+  } else {
+    rowComp.push(randomBtn);
+  }
+  const row = new ActionRowBuilder().addComponents(rowComp);
+
+  // ── Row 2: Queue + Autoplay/Dislike + Random + optional Lyrics/LSync ─
+  const queueBtn = new ButtonBuilder()
+    .setCustomId("playback_queue")
+    .setEmoji("<:lista:1504760412221079553>")
+    .setLabel("List")
+    .setStyle(ButtonStyle.Secondary);
+
+  const isLiked = player._djLikedUrls?.has(player.queue.current?.info?.uri);
+  const showDislike = player._djMode && !isLiked;
+  const centerBtn = showDislike
+    ? new ButtonBuilder()
+        .setCustomId("playback_dislike")
+        .setEmoji("<:dislike:1506181210660012122>")
+        .setStyle(ButtonStyle.Secondary)
+    : !player._djMode
+      ? new ButtonBuilder()
+          .setCustomId("playback_autoplay")
+          .setEmoji("<:autoplay:1505670487806836787>")
+          .setLabel("Autoplay")
+          .setStyle(player._autoplayEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+      : null;
+
+  const row2Comp = [];
+  if (!trackLiked) {
+    row2Comp.push(randomBtn);
+  }
+  if (centerBtn) {
+    row2Comp.push(centerBtn);
+  }
+  row2Comp.push(queueBtn);
+
+  const row2 = new ActionRowBuilder().addComponents(row2Comp);
 
   const hasLyrics = player._lyricsAvailable === true;
   const hasSynced = player._lsyncAvailable === true;

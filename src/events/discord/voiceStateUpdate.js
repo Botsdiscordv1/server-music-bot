@@ -21,6 +21,8 @@ module.exports = {
 
     const humanCount = () => botChannel.members.filter((m) => !m.user.bot).size;
 
+    if (player._farmMode) return;
+
     if (humanCount() === 0 && player.playing) {
       player.pause(true);
 

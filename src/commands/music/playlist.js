@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const { savePlaylist, getPlaylist, getGuildPlaylists, deletePlaylist } = require("../../database");
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
+const { savePlaylist, getPlaylist, getGuildPlaylists, deletePlaylist, copyPlaylist, getUserPlaylists } = require("../../database");
 const { errorEmbed, successEmbed } = require("../../utils/embeds");
 
 module.exports = [
@@ -113,6 +113,80 @@ module.exports = [
       }
 
       interaction.reply({ embeds: [successEmbed("Playlist eliminada.")] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("playlist-copy")
+      .setDescription("Copia una playlist de otro usuario a tu cuenta.")
+      .addUserOption((o) =>
+        o
+          .setName("user")
+          .setDescription("El dueño de la playlist")
+          .setRequired(true)
+      )
+      .addStringOption((o) =>
+        o
+          .setName("playlist")
+          .setDescription("Nombre de la playlist a copiar")
+          .setRequired(true)
+          .setAutocomplete(true)
+      ),
+    async execute(interaction, client) {
+      const fromUser = interaction.options.getUser("user");
+      const playlistName = interaction.options.getString("playlist");
+      const toUserId = interaction.user.id;
+
+      if (fromUser.id === toUserId) {
+        return interaction.reply({
+          embeds: [errorEmbed("No puedes copiar tu propia playlist.")],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      try {
+        const result = await copyPlaylist(interaction.guildId, fromUser.id, toUserId, playlistName);
+        if (!result) {
+          return interaction.editReply({
+            embeds: [errorEmbed(`No se encontró ninguna playlist llamada **${playlistName}** de <@${fromUser.id}> en este servidor.`)]
+          });
+        }
+
+        const embed = successEmbed(
+          `Se copió la playlist **${playlistName}** de <@${fromUser.id}>.\n` +
+          `Nueva playlist: **${result.name}** con **${result.trackCount}** canciones.`
+        );
+        return interaction.editReply({ embeds: [embed] });
+      } catch (err) {
+        console.error("[PlaylistCopy] Error:", err);
+        return interaction.editReply({
+          embeds: [errorEmbed("Ocurrió un error al copiar la playlist.")]
+        });
+      }
+    },
+    async autocomplete(interaction, client) {
+      const focused = interaction.options.getFocused().toLowerCase();
+      const userOption = interaction.options.get("user");
+      const userId = userOption?.value;
+
+      if (!userId) {
+        return interaction.respond([{ name: "Selecciona un usuario primero", value: "" }]).catch(() => {});
+      }
+
+      try {
+        const playlists = await getUserPlaylists(interaction.guildId, userId);
+        const choices = playlists.map((p) => ({ name: p.name, value: p.name }));
+        const filtered = focused
+          ? choices.filter((c) => c.name.toLowerCase().includes(focused))
+          : choices;
+
+        await interaction.respond(filtered.slice(0, 25)).catch(() => {});
+      } catch (err) {
+        console.error("[PlaylistCopy Autocomplete] Error:", err);
+        await interaction.respond([]).catch(() => {});
+      }
     },
   },
 ];
