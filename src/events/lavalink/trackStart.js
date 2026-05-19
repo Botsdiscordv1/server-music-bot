@@ -82,7 +82,6 @@ module.exports = {
       const queueBtn = new ButtonBuilder()
         .setCustomId("playback_queue")
         .setEmoji("<:lista:1504760412221079553>")
-        .setLabel("List")
         .setStyle(ButtonStyle.Secondary);
 
       const isLiked = isSongInLikes(player._djLikedSongs || [], track);
@@ -204,7 +203,6 @@ module.exports = {
                 new ButtonBuilder()
                   .setCustomId("playback_lyrics")
                   .setEmoji("<:letras:1504760747056693278>")
-                  .setLabel("Lyric")
                   .setStyle(ButtonStyle.Secondary)
               );
             }
@@ -213,7 +211,6 @@ module.exports = {
                 new ButtonBuilder()
                   .setCustomId("playback_lsync")
                   .setEmoji("<:lsync:1504786103968989255>")
-                  .setLabel("LSync")
                   .setStyle(ButtonStyle.Secondary)
               );
             }
