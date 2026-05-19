@@ -5,12 +5,12 @@ module.exports = {
     console.log(`✅ Logged in as ${client.user.tag}`);
     client.user.setActivity("🎵 /play", { type: 2 });
 
-    async function warmUp(h, p, auth) {
-      const https = require("https");
+    async function warmUp(h, p, auth, secure) {
+      const mod = secure ? require("https") : require("http");
       for (let i = 0; i < 20; i++) {
         try {
           const r = await new Promise((resolve, reject) => {
-            const req = https.request({ hostname: h, port: p, path: "/v4/info", method: "GET", timeout: 5000, headers: { Authorization: auth } }, resolve);
+            const req = mod.request({ hostname: h, port: p, path: "/v4/info", method: "GET", timeout: 5000, headers: { Authorization: auth } }, resolve);
             req.on("error", reject); req.end();
           });
           console.log(`   Warm attempt ${i + 1}: HTTP ${r.statusCode}`);
@@ -21,7 +21,7 @@ module.exports = {
       console.warn("⚠️ Lavalink warm failed (still 404 after 60s)");
     }
     const n = [...client.lavalink.nodeManager.nodes.values()][0];
-    if (n) await warmUp(n.options.host, n.options.port || 2333, n.options.authorization);
+    if (n) await warmUp(n.options.host, n.options.port || 2333, n.options.authorization, n.options.secure);
 
     await client.lavalink.init({ id: client.user.id, username: client.user.username });
     console.log("✅ Lavalink initialized");
@@ -32,8 +32,8 @@ module.exports = {
     }
 
     function pingLavalink() {
-      const mod = require("https");
       for (const [id, node] of client.lavalink.nodeManager.nodes) {
+        const mod = node.options.secure ? require("https") : require("http");
         const opts = {
           hostname: node.options.host,
           port: node.options.port || 2333,
