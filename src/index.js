@@ -45,6 +45,10 @@ const server = http.createServer((req, res) => {
       t.push(await testWS(`ws${process.env.LAVALINK_SECURE === "true" ? "s" : ""}://${host}:${Number(process.env.LAVALINK_PORT) || 2333}/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
       t.push("\n=== RAW HTTPS (no WebSocket) ===");
       try { const r = await fetch(`https://${host}/v4/websocket`, { headers: { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass" }, signal: AbortSignal.timeout(10000) }); t.push(`HTTP ${r.status} ${r.statusText}`); } catch (e) { t.push(`ERROR: ${e.message}`); }
+      t.push("\n=== WS port 80 (no TLS) ===");
+      t.push(await testWS(`ws://${host}:80/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot" }));
+      t.push("\n=== WS direct IP (bypass DNS) ===");
+      try { const addrs = await dns.promises.resolve4(host); t.push(await testWS(`wss://${addrs[0]}:443/v4/websocket`, { Authorization: process.env.LAVALINK_PASSWORD || "youshallnotpass", "User-Id": process.env.CLIENT_ID || "0", "Client-Name": "MusicBot", Host: host })); } catch (e) { t.push(`ERROR: ${e.message}`); }
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end(t.join("\n"));
     }
