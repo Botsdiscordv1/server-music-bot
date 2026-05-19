@@ -226,6 +226,46 @@ async function getLikedSongs(userId) {
   }));
 }
 
+function isSongInLikes(likedSongs, track) {
+  if (!track?.info || !likedSongs || likedSongs.length === 0) return false;
+
+  const currentUri = track.info.uri;
+  if (currentUri) {
+    const exactMatch = likedSongs.some(s => s.track_url === currentUri);
+    if (exactMatch) return true;
+  }
+
+  const cleanTitle = (title) => (title || "")
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, "")
+    .replace(/\s*-\s*topic$/gi, "")
+    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const cleanAuthor = (author) => (author || "")
+    .toLowerCase()
+    .replace(/\s*-\s*topic$/gi, "")
+    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const currentTitle = cleanTitle(track.info.title);
+  const currentAuthor = cleanAuthor(track.info.author);
+
+  if (currentTitle && currentAuthor) {
+    for (const song of likedSongs) {
+      const likedTitle = cleanTitle(song.track_title);
+      const likedAuthor = cleanAuthor(song.track_author);
+      if (currentTitle === likedTitle && currentAuthor === likedAuthor) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 async function getLikedArtists(userId) {
   await whenReady(() => {});
   const docs = await LikedSong.find({ userId, trackAuthor: { $ne: null } }).lean();
@@ -326,6 +366,7 @@ module.exports = {
   addLikedSong,
   removeLikedSong,
   getLikedSongs,
+  isSongInLikes,
   getLikedArtists,
   incrementTrackPlay,
   getMostPlayedTracks,

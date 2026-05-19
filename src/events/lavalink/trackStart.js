@@ -1,7 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const { nowPlayingEmbed } = require("../../utils/embeds");
 const { getLyrics } = require("../../services/lrclib");
-const { updateUserStats, addToHistory, incrementTrackPlay, getLikedSongs } = require("../../database");
+const { updateUserStats, addToHistory, incrementTrackPlay, getLikedSongs, isSongInLikes } = require("../../database");
 
 
 module.exports = {
@@ -55,14 +55,15 @@ module.exports = {
         ? track.requester.id
         : player.requesterId;
 
-      if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedUrls)) {
+      if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedSongs)) {
         try {
           const liked = await getLikedSongs(targetUserId);
+          player._djLikedSongs = liked;
           player._djLikedUrls = new Set(liked.map(s => s.track_url).filter(Boolean));
           player._djLikedOwner = targetUserId;
         } catch {}
       }
-      const trackLiked = player._djLikedUrls?.has(track.info?.uri);
+      const trackLiked = isSongInLikes(player._djLikedSongs || [], track);
 
       // ── Row 1 setup ───────────────────────────────────────────────────────
       const rowComp = [backBtn, pauseBtn, skipBtn, stopBtn];
@@ -84,7 +85,7 @@ module.exports = {
         .setLabel("List")
         .setStyle(ButtonStyle.Secondary);
 
-      const isLiked = player._djLikedUrls?.has(track.info?.uri);
+      const isLiked = isSongInLikes(player._djLikedSongs || [], track);
       const showDislike = player._djMode && !isLiked;
       const centerBtn = showDislike
         ? new ButtonBuilder()

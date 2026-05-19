@@ -3,7 +3,7 @@ const { errorEmbed, successEmbed, queueEmbed, lyricsEmbed } = require("../../uti
 const { getLyrics, formatLyricsForEmbed } = require("../../services/lrclib");
 const { startKaraoke } = require("../../commands/music/karaoke");
 const searchCommand = require("../../commands/music/search");
-const { addLikedSong } = require("../../database");
+const { addLikedSong, isSongInLikes } = require("../../database");
 const { getTrackKey } = require("../../commands/music/dj");
 const { getAutoplayTrack } = require("../../services/autoplay");
 
@@ -248,6 +248,14 @@ case "playback_lyrics": {
           if (interaction.user.id === targetUserId) {
             if (!player._djLikedUrls) player._djLikedUrls = new Set();
             player._djLikedUrls.add(track.info.uri);
+            if (!player._djLikedSongs) player._djLikedSongs = [];
+            player._djLikedSongs.push({
+              track_title: track.info.title,
+              track_author: track.info.author,
+              track_url: track.info.uri,
+              track_duration: track.info.duration,
+              artwork_url: track.info.artworkUrl
+            });
           }
 
           await interaction.reply({ embeds: [successEmbed(`❤️ **${track.info.title}** añadida a Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
@@ -291,15 +299,16 @@ async function updateNowPlayingButtons(player, client) {
     ? track.requester.id
     : player.requesterId;
 
-  if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedUrls)) {
+  if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedSongs)) {
     try {
       const { getLikedSongs } = require("../../database");
       const liked = await getLikedSongs(targetUserId);
+      player._djLikedSongs = liked;
       player._djLikedUrls = new Set(liked.map(s => s.track_url).filter(Boolean));
       player._djLikedOwner = targetUserId;
     } catch {}
   }
-  const trackLiked = player._djLikedUrls?.has(track?.info?.uri);
+  const trackLiked = isSongInLikes(player._djLikedSongs || [], track);
 
   const randomBtn = new ButtonBuilder()
     .setCustomId("playback_random")
@@ -325,7 +334,7 @@ async function updateNowPlayingButtons(player, client) {
     .setLabel("List")
     .setStyle(ButtonStyle.Secondary);
 
-  const isLiked = player._djLikedUrls?.has(player.queue.current?.info?.uri);
+  const isLiked = isSongInLikes(player._djLikedSongs || [], player.queue.current);
   const showDislike = player._djMode && !isLiked;
   const centerBtn = showDislike
     ? new ButtonBuilder()

@@ -70,6 +70,7 @@ async function loadSeedsFromDB(player) {
     getLikedSongs(userId),
     getMostPlayedTracks(userId, 10),
   ]);
+  player._djLikedSongs = liked;
   const neg = new Set(player._djNegativeSeeds || []);
   if (!player._djLikedUrls) player._djLikedUrls = new Set();
   const seedMap = new Map();
@@ -85,6 +86,19 @@ async function loadSeedsFromDB(player) {
   const seeds = [...seedMap.values()].slice(0, 20);
   player._djPositiveSeeds.push(...seeds);
   return seeds;
+}
+
+function shouldDiscard(title) {
+  if (!title) return false;
+  const lower = title.toLowerCase();
+  const discardPatterns = [
+    /\bkaraoke\b/i,
+    /\binstrumental\b/i,
+    /\b(8|16)\s*-?\s*bit\b/i,
+    /\bslowed\b/i,
+    /\b(speed|sped)\s*-?\s*up\b/i
+  ];
+  return discardPatterns.some(pattern => pattern.test(lower));
 }
 
 async function generateBatch(player, count = 10) {
@@ -133,7 +147,8 @@ async function generateBatch(player, count = 10) {
   const skip = (t) =>
     playedIds.has(t.info?.identifier) ||
     playedTitles.has(t.info?.title?.toLowerCase()) ||
-    isVariant(t.info?.title || "");
+    isVariant(t.info?.title || "") ||
+    shouldDiscard(t.info?.title || "");
 
   const batch = [];
   const MAX_ATTEMPTS = pool.length * 2;
@@ -196,6 +211,7 @@ async function initDJ(player, userId) {
   player._djPlayedTitles = new Set();
   player._djAddedIds = new Set();
   player._djLikedUrls = new Set();
+  player._djLikedSongs = [];
 
   await loadSeedsFromDB(player);
   await refillQueue(player);

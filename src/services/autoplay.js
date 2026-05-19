@@ -70,6 +70,19 @@ function isVariant(title) {
   return VARIANT_WORDS.some((w) => new RegExp(`\\b${w}\\b`, "i").test(lower));
 }
 
+function shouldDiscard(title) {
+  if (!title) return false;
+  const lower = title.toLowerCase();
+  const discardPatterns = [
+    /\bkaraoke\b/i,
+    /\binstrumental\b/i,
+    /\b(8|16)\s*-?\s*bit\b/i,
+    /\bslowed\b/i,
+    /\b(speed|sped)\s*-?\s*up\b/i
+  ];
+  return discardPatterns.some(pattern => pattern.test(lower));
+}
+
 async function getAutoplayTrack(player, currentTrack) {
   const skipData = buildSkipData(player, currentTrack);
 
@@ -83,6 +96,7 @@ function pickBest(tracks, skipData, source = "ytmsearch") {
   let fallback = null;
   for (const t of tracks) {
     if (isDuplicate(t, skipData)) continue;
+    if (shouldDiscard(t.info.title || "")) continue;
     if (!isVariant(t.info.title || "")) {
       return { track: t, source };
     }
