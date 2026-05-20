@@ -47,11 +47,12 @@ async function generateBatch(player, count = 10) {
     playedIds.has(t.info?.identifier) ||
     playedTitles.has(t.info?.title?.toLowerCase());
 
-  const likedSongs = player._djLikedSongs || [];
+  let likedSongs = player._djLikedSongs || [];
 
-  if (likedSongs.length === 0) {
+  if (!likedSongs.length) {
     const dbSeeds = await loadSeedsFromDB(player);
-    if (dbSeeds.length === 0) return [];
+    if (!dbSeeds.length) return [];
+    likedSongs = player._djLikedSongs || [];
   }
 
   const result = await generateSet(player, likedSongs);

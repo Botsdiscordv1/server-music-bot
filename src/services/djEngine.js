@@ -170,43 +170,48 @@ function computeProfile(enriched, likedSongs) {
 
 /**
  * Scores a liked song against the set profile.
+ * Formula: genre*0.35 + bpm*0.20 + energy*0.20 + affinity*0.15 + transition*0.10
+ * Each component normalised to 0-1, weights sum to 1.0 → max score = 100.
  */
-function scoreLikedSong(song, data, profile, index) {
-  let score = 50;
+function scoreLikedSong(song, data, profile) {
+  if (song.track_title && shouldExclude(song.track_title)) return -Infinity;
 
-  if (data) {
-    if (data.genres?.length && profile.dominantGenres?.length) {
-      const matchingGenres = data.genres.filter(g => profile.dominantGenres.includes(g));
-      score += (matchingGenres.length / Math.max(profile.dominantGenres.length, 1)) * 35;
-    }
-
-    if (data.audioFeatures?.tempo && profile.avgBpm) {
-      const diff = Math.abs(data.audioFeatures.tempo - profile.avgBpm);
-      score += (1 - Math.min(diff / 80, 1)) * 20;
-    }
-
-    if (data.audioFeatures?.energy != null && profile.avgEnergy != null) {
-      const diff = Math.abs(data.audioFeatures.energy - profile.avgEnergy);
-      score += (1 - diff) * 20;
-    }
-  } else {
-    score += 15;
+  // genre_similarity (0-1) × 0.35
+  let genreScore = 0;
+  if (data?.genres?.length && profile.dominantGenres?.length) {
+    const matching = data.genres.filter(g => profile.dominantGenres.includes(g)).length;
+    genreScore = matching / Math.max(profile.dominantGenres.length, 1);
   }
 
+  // bpm_similarity (0-1) × 0.20
+  let bpmScore = 0;
+  if (data?.audioFeatures?.tempo && profile.avgBpm) {
+    const diff = Math.abs(data.audioFeatures.tempo - profile.avgBpm);
+    bpmScore = 1 - Math.min(diff / 80, 1);
+  }
+
+  // energy_similarity (0-1) × 0.20
+  let energyScore = 0;
+  if (data?.audioFeatures?.energy != null && profile.avgEnergy != null) {
+    energyScore = 1 - Math.abs(data.audioFeatures.energy - profile.avgEnergy);
+  }
+
+  // user_affinity (0-1) × 0.15
+  let affinityScore = 0;
   if (song.track_author && profile.dominantArtists?.size) {
     const key = authorKey(song.track_author);
-    if (profile.dominantArtists.has(key)) score += 15;
+    if (profile.dominantArtists.has(key)) affinityScore += 0.5;
+  }
+  if (song.liked_at) {
+    const days = (Date.now() - new Date(song.liked_at).getTime()) / 86400000;
+    affinityScore += Math.max(0, (60 - Math.min(days, 60)) / 60) * 0.5;
   }
 
-  const daysSinceLiked = song.liked_at
-    ? (Date.now() - new Date(song.liked_at).getTime()) / 86400000
-    : 999;
-  score += Math.max(0, (60 - Math.min(daysSinceLiked, 60)) / 60 * 10);
+  let finalScore = genreScore * 35 + bpmScore * 20 + energyScore * 20 + affinityScore * 15;
 
-  if (song.track_title && hasVariantTag(song.track_title)) score -= 10;
-  if (song.track_title && shouldExclude(song.track_title)) score = -Infinity;
+  if (song.track_title && hasVariantTag(song.track_title)) finalScore -= 10;
 
-  return score;
+  return finalScore;
 }
 
 /**
@@ -216,8 +221,7 @@ function scoreLikedSong(song, data, profile, index) {
 function selectBestLiked(likedSongs, enriched, profile, count = 6) {
   const scored = likedSongs.map((song, i) => ({
     song,
-    score: scoreLikedSong(song, enriched.get(i), profile, i),
-    index: i,
+    score: scoreLikedSong(song, enriched.get(i), profile),
   }))
     .filter(s => s.score > -Infinity)
     .sort((a, b) => b.score - a.score);
@@ -416,7 +420,7 @@ async function generateSet(player, likedSongs) {
   const profile = computeProfile(enriched, likedSongs);
 
   const scored = likedSongs
-    .map((song, i) => ({ song, score: scoreLikedSong(song, enriched.get(i), profile, i), index: i }))
+    .map((song, i) => ({ song, score: scoreLikedSong(song, enriched.get(i), profile) }))
     .filter(s => s.score > -Infinity)
     .sort((a, b) => b.score - a.score);
 
