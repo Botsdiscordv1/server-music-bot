@@ -1,7 +1,9 @@
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const { requireVoiceChannel } = require("../../utils/checks");
 const { errorEmbed } = require("../../utils/embeds");
 const { getLikedSongs, getMostPlayedTracks } = require("../../database");
+const { isExcluded, isVariant } = require("../../utils/trackFilter");
+const { generateSet } = require("../../services/djEngine");
 
 function getTrackKey(track) {
   const author = track.info?.author || track.track_author || track.author || "";
@@ -9,60 +11,9 @@ function getTrackKey(track) {
   return `${author} - ${title}`.trim();
 }
 
-function shuffle(a) {
-  const arr = [...a];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
+function shouldDiscard(title) {
+  return isExcluded(title);
 }
-
-// All strategies use the full "artist - title" query so Lavalink
-// returns complete metadata (feat., explicit, etc.) → lyrics work.
-const SEARCH_STRATEGIES = [
-  // 0: skip first 2 results
-  async (player, seed, skip) => {
-    const r = await player.search({ query: `${seed.author} - ${seed.title}`, source: "ytmsearch" }, { id: "dj", username: "DJ" });
-    if (!r?.tracks?.length) return null;
-    for (let i = Math.min(2, r.tracks.length - 1); i < r.tracks.length; i++) {
-      if (!skip(r.tracks[i])) return r.tracks[i];
-    }
-    return null;
-  },
-  // 1: skip first 3
-  async (player, seed, skip) => {
-    const r = await player.search({ query: `${seed.author} - ${seed.title}`, source: "ytmsearch" }, { id: "dj", username: "DJ" });
-    if (!r?.tracks?.length) return null;
-    for (let i = Math.min(3, r.tracks.length - 1); i < r.tracks.length; i++) {
-      if (!skip(r.tracks[i])) return r.tracks[i];
-    }
-    return null;
-  },
-  // 2: random non-first
-  async (player, seed, skip) => {
-    const r = await player.search({ query: `${seed.author} - ${seed.title}`, source: "ytmsearch" }, { id: "dj", username: "DJ" });
-    if (!r?.tracks?.length) return null;
-    const indices = [...Array(r.tracks.length).keys()].slice(1);
-    shuffle(indices);
-    for (const i of indices) { if (!skip(r.tracks[i])) return r.tracks[i]; }
-    return null;
-  },
-  // 3: last result
-  async (player, seed, skip) => {
-    const r = await player.search({ query: `${seed.author} - ${seed.title}`, source: "ytmsearch" }, { id: "dj", username: "DJ" });
-    if (!r?.tracks?.length) return null;
-    for (let i = r.tracks.length - 1; i >= 0; i--) {
-      if (!skip(r.tracks[i])) return r.tracks[i];
-    }
-    return null;
-  },
-  // 4: first result (fallback)
-  async (player, seed, skip) => {
-    const r = await player.search({ query: `${seed.author} - ${seed.title}`, source: "ytmsearch" }, { id: "dj", username: "DJ" });
-    return r?.tracks?.[0] || null;
-  },
-];
 
 async function loadSeedsFromDB(player) {
   const userId = player.requesterId;
@@ -71,8 +22,8 @@ async function loadSeedsFromDB(player) {
     getMostPlayedTracks(userId, 10),
   ]);
   player._djLikedSongs = liked;
-  const neg = new Set(player._djNegativeSeeds || []);
   if (!player._djLikedUrls) player._djLikedUrls = new Set();
+  const neg = new Set(player._djNegativeSeeds || []);
   const seedMap = new Map();
   for (const s of liked) {
     const key = `${s.track_author} - ${s.track_title}`.trim();
@@ -88,88 +39,47 @@ async function loadSeedsFromDB(player) {
   return seeds;
 }
 
-function shouldDiscard(title) {
-  if (!title) return false;
-  const lower = title.toLowerCase();
-  const discardPatterns = [
-    /\bkaraoke\b/i,
-    /\binstrumental\b/i,
-    /\b(8|16)\s*-?\s*bit\b/i,
-    /\bslowed\b/i,
-    /\b(speed|sped)\s*-?\s*up\b/i
-  ];
-  return discardPatterns.some(pattern => pattern.test(lower));
-}
-
 async function generateBatch(player, count = 10) {
-  const used = new Set(player._djUsedSeeds || []);
-  const neg = new Set(player._djNegativeSeeds || []);
-
-  // Collect available seeds (positive → completed)
-  let pool = (player._djPositiveSeeds || []).filter(s => !neg.has(s.key) && !used.has(s.key));
-  if (pool.length < count) {
-    const completed = (player._djCompletedTracks || []).filter(s => !neg.has(s.key));
-    for (const s of completed) {
-      if (!neg.has(s.key) && !pool.find(p => p.key === s.key)) pool.push(s);
-    }
-  }
-  // Reset used and retry with all positive seeds
-  if (pool.length < count) {
-    player._djUsedSeeds = [];
-    pool = (player._djPositiveSeeds || []).filter(s => !neg.has(s.key));
-  }
-  // Pull from DB
-  if (pool.length < count) {
-    const dbSeeds = await loadSeedsFromDB(player);
-    pool = dbSeeds.filter(s => !neg.has(s.key));
-  }
-
-  if (pool.length === 0) return [];
-
-  pool = shuffle(pool);
-
-  const VARIANT_WORDS = [
-    "acoustic", "live", "remix", "cover", "instrumental", "sped up", "slowed down",
-    "reverb", "extended", "radio edit", "club mix", "dub mix", "original mix",
-    "orchestral", "piano", "strings", "demo", "edit", "reprise", "rework",
-    "reimagined", "stripped", "session", "performance", "karaoke", "nightcore",
-    "daycore", "super slowed", "8d", "lyric video", "lyrics", "official video",
-    "official audio", "official lyric", "visualizer", "remastered", "spedup",
-    "sloweddown", "a cappella", "acapella",
-  ];
-  const isVariant = (title) => {
-    const lower = title.toLowerCase();
-    return VARIANT_WORDS.some((w) => new RegExp(`\\b${w}\\b`, "i").test(lower));
-  };
-
   const playedIds = player._djPlayedIds || new Set();
   const playedTitles = player._djPlayedTitles || new Set();
-  const skip = (t) =>
+
+  const isPlayed = (t) =>
     playedIds.has(t.info?.identifier) ||
-    playedTitles.has(t.info?.title?.toLowerCase()) ||
-    isVariant(t.info?.title || "") ||
-    shouldDiscard(t.info?.title || "");
+    playedTitles.has(t.info?.title?.toLowerCase());
+
+  const likedSongs = player._djLikedSongs || [];
+
+  if (likedSongs.length === 0) {
+    const dbSeeds = await loadSeedsFromDB(player);
+    if (dbSeeds.length === 0) return [];
+  }
+
+  const result = await generateSet(player, likedSongs);
+
+  if (!result.tracks.length) return [];
 
   const batch = [];
-  const MAX_ATTEMPTS = pool.length * 2;
-  let attempts = 0;
+  const usedTitleKeys = new Set();
 
-  for (let i = 0; i < pool.length && batch.length < count && attempts < MAX_ATTEMPTS; i++) {
-    attempts++;
-    const seed = pool[i];
-    const strategy = SEARCH_STRATEGIES[i % SEARCH_STRATEGIES.length];
-    try {
-      const track = await strategy(player, seed, skip);
-      if (track && !skip(track)) {
-        batch.push(track);
-        playedIds.add(track.info?.identifier);
-        playedTitles.add(track.info?.title?.toLowerCase());
-      }
-    } catch {}
-    // Mark seed as used regardless of result
-    const usedArr = player._djUsedSeeds || [];
-    if (!usedArr.includes(seed.key)) usedArr.push(seed.key);
-    player._djUsedSeeds = usedArr.slice(-50);
+  for (const track of result.tracks) {
+    if (batch.length >= count) break;
+    if (isPlayed(track)) continue;
+    if (shouldDiscard(track.info?.title || "")) continue;
+
+    const titleKey = (track.info?.title || "").toLowerCase();
+    if (usedTitleKeys.has(titleKey)) continue;
+
+    batch.push(track);
+    usedTitleKeys.add(titleKey);
+    playedIds.add(track.info?.identifier);
+    playedTitles.add(track.info?.title?.toLowerCase());
+  }
+
+  if (batch.length === 0) {
+    const track = result.tracks[0];
+    if (track && !isPlayed(track)) {
+      batch.push(track);
+    }
   }
 
   player._djPlayedIds = playedIds;
@@ -220,7 +130,7 @@ async function initDJ(player, userId) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("dj")
-    .setDescription("Modo DJ — radio infinita con recomendaciones que aprenden de tus gustos."),
+    .setDescription("Modo DJ — sets inteligentes de 10 canciones basados en tus gustos."),
 
   async execute(interaction, client) {
     try {
@@ -244,7 +154,6 @@ module.exports = {
 
       if (!player.connected) await player.connect();
 
-      // Toggle off if DJ mode is already active
       if (player._djMode) {
         player._djMode = false;
         const djIds = player._djAddedIds || new Set();
@@ -253,7 +162,7 @@ module.exports = {
           await player.queue.splice(0, player.queue.tracks.length);
         }
         if (kept.length > 0) player.queue.add(kept);
-        return interaction.editReply({ embeds: [new (require("discord.js").EmbedBuilder)()
+        return interaction.editReply({ embeds: [new EmbedBuilder()
           .setColor(0xff6b6b)
           .setDescription(
             kept.length > 0
@@ -274,15 +183,15 @@ module.exports = {
       if (isPlaying) {
         await initDJ(player, interaction.user.id);
 
-        const embed = new (require("discord.js").EmbedBuilder)()
+        const embed = new EmbedBuilder()
           .setColor(0x1db954)
           .setAuthor({ name: "🎧 Modo DJ Programado" })
           .setDescription(
             `El bot entrará en Modo DJ al terminar la canción actual: **${player.queue.current.info.title}**.\n` +
-            `Seed tracks: ${player._djPositiveSeeds.length} canciones · ` +
+            `Canciones disponibles: ${player._djLikedSongs.length} · ` +
             `Cola: ${player.queue.tracks.length} tracks`
           )
-          .setFooter({ text: "Powered by YouTube Music" });
+          .setFooter({ text: "Powered by Spotify & YouTube Music" });
 
         return interaction.editReply({ embeds: [embed] });
       } else {
@@ -297,15 +206,15 @@ module.exports = {
         await player.play({ paused: false });
         player._trackStartTime = Date.now();
 
-        const embed = new (require("discord.js").EmbedBuilder)()
+        const embed = new EmbedBuilder()
           .setColor(0x1db954)
           .setAuthor({ name: "🎧 Modo DJ Activado" })
           .setDescription(
-            `Radio infinita basada en tus gustos.\n` +
-            `Seed tracks: ${player._djPositiveSeeds.length} canciones · ` +
+            `Sets inteligentes de 10 canciones.\n` +
+            `Canciones disponibles: ${player._djLikedSongs.length} · ` +
             `Cola: ${player.queue.tracks.length} tracks`
           )
-          .setFooter({ text: "Powered by YouTube Music" });
+          .setFooter({ text: "Powered by Spotify & YouTube Music" });
 
         await interaction.editReply({ embeds: [embed] });
       }
@@ -316,6 +225,5 @@ module.exports = {
   },
 };
 
-// ── Exports for trackEnd and interactionCreate to use ───────────────
 module.exports.refillQueue = refillQueue;
 module.exports.getTrackKey = getTrackKey;

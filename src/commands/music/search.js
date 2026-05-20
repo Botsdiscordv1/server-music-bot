@@ -175,11 +175,13 @@ module.exports.handleSearchSelect = async function (interaction, client) {
       interaction.user
     );
 
-    if (!result?.tracks?.[0]) {
+    if (!result?.tracks?.length) {
       return interaction.editReply({ embeds: [errorEmbed("No se encontro la cancion en YouTube")] });
     }
 
-    track = result.tracks[0];
+    const { filterAndSort } = require("../../utils/trackFilter");
+    const sorted = filterAndSort(result.tracks);
+    track = sorted.length > 0 ? sorted[0] : result.tracks[0];
     if (track) track._originalSource = "spotify";
   } else {
     track = data.tracks[index];

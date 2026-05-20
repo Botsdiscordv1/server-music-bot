@@ -29,9 +29,12 @@ module.exports = {
           track.requester
         );
         if (result?.tracks?.length > 0) {
+          const { filterAndSort } = require("../../utils/trackFilter");
+          const sorted = filterAndSort(result.tracks);
+          const tracksToUse = sorted.length > 0 ? sorted : result.tracks;
           const altTrack = videoId
-            ? result.tracks.find(t => !t.info.uri?.includes(videoId)) || result.tracks[0]
-            : result.tracks[0];
+            ? tracksToUse.find(t => !t.info.uri?.includes(videoId)) || tracksToUse[0]
+            : tracksToUse[0];
           player.queue.add(altTrack, 0);
           const isStillOnErrored = player.queue.current?.info?.uri === track?.info?.uri;
           if (isStillOnErrored) {

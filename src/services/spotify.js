@@ -103,6 +103,54 @@ async function getRecommendations(seedTrackIds = [], seedArtistIds = []) {
 }
 
 /**
+ * Get audio features for multiple Spotify tracks.
+ * @param {string[]} trackIds
+ * @returns {Array<{ id: string, tempo: number, energy: number, danceability: number, valence: number, acousticness: number, instrumentalness: number } | null>}
+ */
+async function getAudioFeatures(trackIds) {
+  if (!trackIds.length) return [];
+  const token = await getAccessToken();
+  const ids = trackIds.map(id => id.replace("spotify:track:", "")).join(",");
+  const res = await axios.get("https://api.spotify.com/v1/audio-features", {
+    headers: { Authorization: `Bearer ${token}` },
+    params: { ids },
+  });
+  return res.data.audio_features || [];
+}
+
+/**
+ * Get multiple Spotify tracks by ID.
+ * @param {string[]} trackIds
+ * @returns {SpotifyTrack[]}
+ */
+async function getSeveralTracks(trackIds) {
+  if (!trackIds.length) return [];
+  const token = await getAccessToken();
+  const ids = trackIds.map(id => id.replace("spotify:track:", "")).join(",");
+  const res = await axios.get("https://api.spotify.com/v1/tracks", {
+    headers: { Authorization: `Bearer ${token}` },
+    params: { ids },
+  });
+  return (res.data.tracks || []).map(formatTrack);
+}
+
+/**
+ * Get multiple artists by ID (includes genres).
+ * @param {string[]} artistIds
+ * @returns {Array<{ id: string, name: string, genres: string[] }>}
+ */
+async function getArtists(artistIds) {
+  if (!artistIds.length) return [];
+  const token = await getAccessToken();
+  const ids = artistIds.join(",");
+  const res = await axios.get("https://api.spotify.com/v1/artists", {
+    headers: { Authorization: `Bearer ${token}` },
+    params: { ids },
+  });
+  return res.data.artists || [];
+}
+
+/**
  * Get an artist's top tracks.
  * @param {string} artistId
  * @returns {SpotifyTrack[]}
@@ -195,6 +243,9 @@ module.exports = {
   getTrack,
   getPlaylist,
   getRecommendations,
+  getAudioFeatures,
+  getSeveralTracks,
+  getArtists,
   getArtistTopTracks,
   getTrackOembed,
 };

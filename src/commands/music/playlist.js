@@ -56,17 +56,20 @@ module.exports = [
 
       if (!player.connected) await player.connect();
 
+      const { filterAndSort } = require("../../utils/trackFilter");
       const tracks = JSON.parse(playlist.tracks);
       for (const t of tracks) {
         const result = await player.search({ query: `${t.title} ${t.author}`, source: "ytmsearch" }, interaction.user);
-        if (result?.tracks?.[0]) {
+        if (result?.tracks?.length > 0) {
+          const sorted = filterAndSort(result.tracks);
+          const bestTrack = sorted.length > 0 ? sorted[0] : result.tracks[0];
           if (player._shuffleEnabled) {
             const pos = Math.floor(Math.random() * (player.queue.tracks.length + 1));
-            await player.queue.add(result.tracks[0], pos);
+            await player.queue.add(bestTrack, pos);
             if (!player._naturalQueue) player._naturalQueue = [];
-            player._naturalQueue.push(result.tracks[0]);
+            player._naturalQueue.push(bestTrack);
           } else {
-            player.queue.add(result.tracks[0]);
+            player.queue.add(bestTrack);
           }
         }
       }

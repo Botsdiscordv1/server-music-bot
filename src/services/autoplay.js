@@ -1,4 +1,5 @@
 const { getRecommendations, searchTracks } = require("./spotify");
+const { isExcluded, isVariant: tfIsVariant, pickBest: tfPickBest } = require("../utils/trackFilter");
 
 const VARIANT_WORDS = [
   "acoustic", "live", "remix", "cover", "instrumental", "sped ?up", "slowed ?down",
@@ -66,21 +67,11 @@ function isDuplicate(candidate, { skipIds, skipBases, skipFull }) {
 }
 
 function isVariant(title) {
-  const lower = title.toLowerCase();
-  return VARIANT_WORDS.some((w) => new RegExp(`\\b${w}\\b`, "i").test(lower));
+  return tfIsVariant(title);
 }
 
 function shouldDiscard(title) {
-  if (!title) return false;
-  const lower = title.toLowerCase();
-  const discardPatterns = [
-    /\bkaraoke\b/i,
-    /\binstrumental\b/i,
-    /\b(8|16)\s*-?\s*bit\b/i,
-    /\bslowed\b/i,
-    /\b(speed|sped)\s*-?\s*up\b/i
-  ];
-  return discardPatterns.some(pattern => pattern.test(lower));
+  return isExcluded(title);
 }
 
 async function getAutoplayTrack(player, currentTrack) {
@@ -93,16 +84,7 @@ async function getAutoplayTrack(player, currentTrack) {
 }
 
 function pickBest(tracks, skipData, source = "ytmsearch") {
-  let fallback = null;
-  for (const t of tracks) {
-    if (isDuplicate(t, skipData)) continue;
-    if (shouldDiscard(t.info.title || "")) continue;
-    if (!isVariant(t.info.title || "")) {
-      return { track: t, source };
-    }
-    if (!fallback) fallback = t;
-  }
-  return fallback ? { track: fallback, source } : null;
+  return tfPickBest(tracks, (t) => isDuplicate(t, skipData), source);
 }
 
 async function trySpotify(player, currentTrack, skipData) {

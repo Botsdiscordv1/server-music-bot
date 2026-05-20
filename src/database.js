@@ -40,6 +40,7 @@ const likedSongSchema = new mongoose.Schema({
   trackUrl: String,
   trackDuration: Number,
   artworkUrl: String,
+  isrc: String,
   likedAt: { type: Date, default: Date.now },
 });
 
@@ -185,11 +186,28 @@ async function clearHistory(guildId) {
 }
 
 // ── Liked Songs ─────────────────────────────────────────────────────────
+
+/**
+ * Extracts the ISRC from a Lavalink track, if available.
+ * Checks multiple sources in order: pluginInfo.isrc, info.isrc, info.extra.isrc, info.identifier (ISRC format).
+ */
+function extractIsrc(track) {
+  if (!track?.info) return null;
+  if (track.pluginInfo?.isrc) return track.pluginInfo.isrc;
+  if (track.info.isrc) return track.info.isrc;
+  if (track.info.extra?.isrc) return track.info.extra.isrc;
+  if (track.info.identifier && /^[A-Z]{2}[A-Z0-9]{3}\d{2}\d{5}$/.test(track.info.identifier)) {
+    return track.info.identifier;
+  }
+  return null;
+}
+
 async function addLikedSong(userId, track) {
   await whenReady(() => {});
   try {
     const exists = await LikedSong.findOne({ userId, trackUrl: track.info.uri });
     if (exists) return false;
+    const isrc = extractIsrc(track);
     await LikedSong.create({
       userId,
       trackTitle: track.info.title,
@@ -197,6 +215,7 @@ async function addLikedSong(userId, track) {
       trackUrl: track.info.uri,
       trackDuration: track.info.duration,
       artworkUrl: track.info.artworkUrl,
+      isrc: isrc || undefined,
     });
     return true;
   } catch { return false; }
@@ -211,6 +230,12 @@ async function removeLikedSong(userId, id) {
   return target;
 }
 
+async function removeAllLikedSongs(userId) {
+  await whenReady(() => {});
+  const result = await LikedSong.deleteMany({ userId });
+  return result.deletedCount;
+}
+
 async function getLikedSongs(userId) {
   await whenReady(() => {});
   const docs = await LikedSong.find({ userId }).sort({ likedAt: -1 }).lean();
@@ -222,6 +247,7 @@ async function getLikedSongs(userId) {
     track_url: doc.trackUrl,
     track_duration: doc.trackDuration,
     artwork_url: doc.artworkUrl,
+    isrc: doc.isrc,
     liked_at: doc.likedAt,
   }));
 }
@@ -229,34 +255,21 @@ async function getLikedSongs(userId) {
 function isSongInLikes(likedSongs, track) {
   if (!track?.info || !likedSongs || likedSongs.length === 0) return false;
 
-  const currentUri = track.info.uri;
-  if (currentUri) {
-    const exactMatch = likedSongs.some(s => s.track_url === currentUri);
-    if (exactMatch) return true;
+  // Priority 1: ISRC match
+  const currentIsrc = extractIsrc(track);
+  if (currentIsrc) {
+    const isrcMatch = likedSongs.some(s => s.isrc && s.isrc === currentIsrc);
+    if (isrcMatch) return true;
   }
 
-  const cleanTitle = (title) => (title || "")
-    .toLowerCase()
-    .replace(/\(.*?\)|\[.*?\]/g, "")
-    .replace(/\s*-\s*topic$/gi, "")
-    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const cleanAuthor = (author) => (author || "")
-    .toLowerCase()
-    .replace(/\s*-\s*topic$/gi, "")
-    .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const currentTitle = cleanTitle(track.info.title);
-  const currentAuthor = cleanAuthor(track.info.author);
+  // Priority 2: exact title + exact artist (case-insensitive, strict otherwise)
+  const currentTitle = (track.info.title || "").toLowerCase();
+  const currentAuthor = (track.info.author || "").replace(/\s*-\s*topic$/i, "").toLowerCase().trim();
 
   if (currentTitle && currentAuthor) {
     for (const song of likedSongs) {
-      const likedTitle = cleanTitle(song.track_title);
-      const likedAuthor = cleanAuthor(song.track_author);
+      const likedTitle = (song.track_title || "").toLowerCase();
+      const likedAuthor = (song.track_author || "").toLowerCase().trim();
       if (currentTitle === likedTitle && currentAuthor === likedAuthor) {
         return true;
       }
@@ -316,6 +329,7 @@ async function copyLikedSongs(fromUserId, toUserId) {
         trackUrl: song.trackUrl,
         trackDuration: song.trackDuration,
         artworkUrl: song.artworkUrl,
+        isrc: song.isrc,
       });
       copied++;
     } else {
@@ -365,8 +379,10 @@ module.exports = {
   clearHistory,
   addLikedSong,
   removeLikedSong,
+  removeAllLikedSongs,
   getLikedSongs,
   isSongInLikes,
+  extractIsrc,
   getLikedArtists,
   incrementTrackPlay,
   getMostPlayedTracks,

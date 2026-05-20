@@ -249,12 +249,14 @@ case "playback_lyrics": {
             if (!player._djLikedUrls) player._djLikedUrls = new Set();
             player._djLikedUrls.add(track.info.uri);
             if (!player._djLikedSongs) player._djLikedSongs = [];
+            const { extractIsrc } = require("../../database");
             player._djLikedSongs.push({
               track_title: track.info.title,
               track_author: track.info.author,
               track_url: track.info.uri,
               track_duration: track.info.duration,
-              artwork_url: track.info.artworkUrl
+              artwork_url: track.info.artworkUrl,
+              isrc: extractIsrc(track),
             });
           }
 

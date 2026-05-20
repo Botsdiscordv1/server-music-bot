@@ -132,12 +132,31 @@ module.exports = {
       });
     }
 
-    const track = result.tracks[0];
+    const { filterAndSort, isExcluded } = require("../../utils/trackFilter");
+
+    let track = result.tracks[0];
+    if (result.tracks?.length > 0) {
+      if (isSpotify) {
+        const sorted = filterAndSort(result.tracks);
+        if (sorted.length > 0) {
+          track = sorted[0];
+        }
+      } else if (!isYouTubeUrl) {
+        const queryLower = query.toLowerCase();
+        if (!isExcluded(queryLower)) {
+          const sorted = filterAndSort(result.tracks);
+          if (sorted.length > 0) {
+            track = sorted[0];
+          }
+        }
+      }
+    }
+
     if (track?.info?.identifier) {
       const cached = autocompleteArtworkCache.get(track.info.identifier);
       if (cached) track.info.artworkUrl = cached;
     }
-    if (isSpotify) track._originalSource = "spotify";
+    if (isSpotify && track) track._originalSource = "spotify";
 
     if (player._shuffleEnabled) {
       const pos = Math.floor(Math.random() * (player.queue.tracks.length + 1));

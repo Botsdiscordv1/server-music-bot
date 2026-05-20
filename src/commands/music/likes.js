@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
-const { getLikedSongs, removeLikedSong, copyLikedSongs } = require("../../database");
+const { getLikedSongs, removeLikedSong, removeAllLikedSongs, copyLikedSongs } = require("../../database");
 const { errorEmbed, successEmbed } = require("../../utils/embeds");
 
 const ITEMS_PER_PAGE = 10;
@@ -118,6 +118,70 @@ module.exports = [
           embeds: [errorEmbed("Ocurrió un error al copiar las canciones.")]
         });
       }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName("likes-remove-all")
+      .setDescription("Elimina todas las canciones de Tus Me Gusta."),
+    async execute(interaction, client) {
+      const songs = await getLikedSongs(interaction.user.id);
+      if (songs.length === 0) {
+        return interaction.reply({ embeds: [errorEmbed("No tienes canciones en Tus Me Gusta.")], flags: MessageFlags.Ephemeral });
+      }
+
+      const confirmEmbed = new EmbedBuilder()
+        .setColor(0xfee75c)
+        .setTitle("⚠️ Confirmación requerida")
+        .setDescription(`Esto eliminará **todas** las **${songs.length} canciones** de Tus Me Gusta.\n\nEsta acción es **irreversible**.`)
+        .setFooter({ text: "Tienes 30 segundos para confirmar" });
+
+      const confirmBtn = new ButtonBuilder()
+        .setCustomId("likes_remove_all_confirm")
+        .setLabel("Sí, eliminar todo")
+        .setStyle(ButtonStyle.Danger);
+
+      const cancelBtn = new ButtonBuilder()
+        .setCustomId("likes_remove_all_cancel")
+        .setLabel("Cancelar")
+        .setStyle(ButtonStyle.Secondary);
+
+      const row = new ActionRowBuilder().addComponents(cancelBtn, confirmBtn);
+
+      await interaction.reply({ embeds: [confirmEmbed], components: [row], flags: MessageFlags.Ephemeral });
+      const reply = await interaction.fetchReply();
+
+      const collector = reply.createMessageComponentCollector({ time: 30000 });
+
+      collector.on("collect", async (btn) => {
+        if (btn.user.id !== interaction.user.id) {
+          return btn.reply({ content: "No puedes confirmar la acción de otro usuario.", flags: MessageFlags.Ephemeral });
+        }
+
+        if (btn.customId === "likes_remove_all_confirm") {
+          const deleted = await removeAllLikedSongs(interaction.user.id);
+          console.log(`[LikesRemoveAll] User ${interaction.user.id} deleted ${deleted} liked songs.`);
+          const resultEmbed = new EmbedBuilder()
+            .setColor(0x57f287)
+            .setDescription(`✅ Se eliminaron **${deleted} canciones** de Tus Me Gusta.`);
+          await btn.update({ embeds: [resultEmbed], components: [] });
+        } else {
+          const cancelEmbed = new EmbedBuilder()
+            .setColor(0xed4245)
+            .setDescription("❌ Eliminación cancelada.");
+          await btn.update({ embeds: [cancelEmbed], components: [] });
+        }
+        collector.stop();
+      });
+
+      collector.on("end", async (collected, reason) => {
+        if (reason === "time") {
+          const timeoutEmbed = new EmbedBuilder()
+            .setColor(0xed4245)
+            .setDescription("⏰ Tiempo agotado. Eliminación cancelada.");
+          await interaction.editReply({ embeds: [timeoutEmbed], components: [] }).catch(() => {});
+        }
+      });
     },
   },
 ];
