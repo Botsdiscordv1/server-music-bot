@@ -324,6 +324,14 @@ async function resolveSpotifyIds(songs, max = 5) {
 async function resolveRecommendations(player, likedSongs, profile, count = 4) {
   const spotifyIds = await resolveSpotifyIds(likedSongs, 5);
 
+  const current = player.queue?.current;
+  if (current) {
+    const currentId = current.pluginInfo?.identifier || current.info?.uri?.match(/track[:/]([A-Za-z0-9]+)/)?.[1];
+    if (currentId && !spotifyIds.includes(currentId)) {
+      spotifyIds.unshift(currentId);
+    }
+  }
+
   if (!spotifyIds.length) return [];
 
   try {
@@ -356,16 +364,14 @@ async function resolveRecommendations(player, likedSongs, profile, count = 4) {
 
 /**
  * Orders tracks for smooth DJ transition.
- * Mixes liked + recommended into a single energy-curved set,
- * avoiding consecutive same-artist.
+ * Avoids consecutive same-artist.
  */
-function orderSet(likedTracks, recommendedTracks) {
-  const allTracks = [...likedTracks, ...recommendedTracks];
-  if (allTracks.length <= 1) return allTracks;
+function orderSet(tracks) {
+  if (!tracks?.length || tracks.length <= 1) return tracks || [];
 
   const getArtist = (t) => authorKey(t.info?.author || t.track_author || "");
 
-  const entries = allTracks.map(t => ({
+  const entries = tracks.map(t => ({
     track: t,
     artist: getArtist(t),
     energy: 0.5,
@@ -409,22 +415,48 @@ async function generateSet(player, likedSongs) {
   const enriched = await enrichLikedSongs(likedSongs);
   const profile = computeProfile(enriched, likedSongs);
 
-  const bestLiked = selectBestLiked(likedSongs, enriched, profile, 6);
+  const scored = likedSongs
+    .map((song, i) => ({ song, score: scoreLikedSong(song, enriched.get(i), profile, i), index: i }))
+    .filter(s => s.score > -Infinity)
+    .sort((a, b) => b.score - a.score);
 
+  const usedTitleKeys = new Set();
   const likedTracks = [];
-  for (const song of bestLiked) {
-    const track = await resolveLikedTrack(player, song);
-    if (track) likedTracks.push(track);
+
+  for (const candidate of scored) {
+    if (likedTracks.length >= 6) break;
+    const key = titleKey(candidate.song.track_title);
+    if (usedTitleKeys.has(key)) continue;
+    const track = await resolveLikedTrack(player, candidate.song);
+    if (track) {
+      likedTracks.push(track);
+      usedTitleKeys.add(key);
+    }
   }
 
-  const recommendedTracks = await resolveRecommendations(player, bestLiked, profile, 4);
+  const recommendedTracks = await resolveRecommendations(player, likedSongs, profile, 4);
 
-  const ordered = orderSet(likedTracks, recommendedTracks);
+  let extraLikedTracks = [];
+  if (likedTracks.length + recommendedTracks.length < 10) {
+    for (const candidate of scored) {
+      if (likedTracks.length + recommendedTracks.length + extraLikedTracks.length >= 10) break;
+      const key = titleKey(candidate.song.track_title);
+      if (usedTitleKeys.has(key)) continue;
+      const track = await resolveLikedTrack(player, candidate.song);
+      if (track) {
+        extraLikedTracks.push(track);
+        usedTitleKeys.add(key);
+      }
+    }
+  }
+
+  const allTracks = [...likedTracks, ...recommendedTracks, ...extraLikedTracks];
+  const ordered = orderSet(allTracks);
 
   return {
     tracks: ordered,
     profile,
-    likedUsed: likedTracks.length,
+    likedUsed: likedTracks.length + extraLikedTracks.length,
     recommendedUsed: recommendedTracks.length,
   };
 }
