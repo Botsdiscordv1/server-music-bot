@@ -78,7 +78,7 @@ module.exports = [
   },
   {
     data: new SlashCommandBuilder()
-      .setName("like-copy")
+      .setName("likes-copy")
       .setDescription("Copia la lista de Tus Me Gusta de otro usuario a tu lista.")
       .addUserOption((o) =>
         o
