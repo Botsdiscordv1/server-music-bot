@@ -265,17 +265,23 @@ function selectBestLiked(likedSongs, enriched, profile, count = 6) {
  * Searches Lavalink for a track and returns the best match.
  */
 async function resolveTrack(player, query) {
-  try {
-    const result = await player.search(
-      { query, source: "ytmsearch" },
-      { username: "DJ", id: "dj" }
-    );
-    if (!result?.tracks?.length) return null;
-    const best = pickBest(result.tracks, () => false);
-    return best?.track || result.tracks[0];
-  } catch {
-    return null;
+  const sources = ["ytmsearch", "ytsearch"];
+  for (const source of sources) {
+    try {
+      const result = await player.search(
+        { query, source },
+        { username: "DJ", id: "dj" }
+      );
+      if (!result?.tracks?.length) continue;
+      const best = pickBest(result.tracks, () => false);
+      if (best?.track) return best.track;
+      for (const t of result.tracks) {
+        if (!shouldExclude(t.info?.title || "")) return t;
+      }
+      return result.tracks[0];
+    } catch {}
   }
+  return null;
 }
 
 /**
