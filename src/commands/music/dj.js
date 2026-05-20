@@ -23,12 +23,14 @@ async function loadSeedsFromDB(player) {
   ]);
   player._djLikedSongs = liked;
   if (!player._djLikedUrls) player._djLikedUrls = new Set();
+  for (const s of liked) {
+    if (s.track_url) player._djLikedUrls.add(s.track_url);
+  }
   const neg = new Set(player._djNegativeSeeds || []);
   const seedMap = new Map();
   for (const s of liked) {
     const key = `${s.track_author} - ${s.track_title}`.trim();
     if (!neg.has(key)) seedMap.set(key, { key, title: s.track_title, author: s.track_author });
-    if (s.track_url) player._djLikedUrls.add(s.track_url);
   }
   for (const s of top) {
     const key = `${s.track_author} - ${s.track_title}`.trim();
@@ -47,13 +49,11 @@ async function generateBatch(player, count = 10) {
     playedIds.has(t.info?.identifier) ||
     playedTitles.has(t.info?.title?.toLowerCase());
 
-  let likedSongs = player._djLikedSongs || [];
+  const userId = player.requesterId;
+  if (!userId) return [];
 
-  if (!likedSongs.length) {
-    const dbSeeds = await loadSeedsFromDB(player);
-    if (!dbSeeds.length) return [];
-    likedSongs = player._djLikedSongs || [];
-  }
+  const likedSongs = await getLikedSongs(userId);
+  if (!likedSongs.length) return [];
 
   const result = await generateSet(player, likedSongs);
 
