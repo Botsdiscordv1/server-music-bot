@@ -90,11 +90,12 @@ async function getPlaylist(playlistId) {
  * @param {string[]} seedArtistIds  Up to 2 Spotify artist IDs
  * @returns {SpotifyTrack[]}
  */
-async function getRecommendations(seedTrackIds = [], seedArtistIds = []) {
+async function getRecommendations(seedTrackIds = [], seedArtistIds = [], seedGenres = []) {
   const token = await getAccessToken();
   const params = { limit: 10 };
   if (seedTrackIds.length > 0) params.seed_tracks = seedTrackIds.slice(0, 5).join(",");
   if (seedArtistIds.length > 0) params.seed_artists = seedArtistIds.slice(0, 2).join(",");
+  if (seedGenres.length > 0) params.seed_genres = seedGenres.slice(0, 2).join(",");
   const res = await axios.get("https://api.spotify.com/v1/recommendations", {
     headers: { Authorization: `Bearer ${token}` },
     params,

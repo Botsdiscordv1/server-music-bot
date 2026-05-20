@@ -53,6 +53,16 @@ const trackPlaySchema = new mongoose.Schema({
 });
 trackPlaySchema.index({ userId: 1, trackUrl: 1 }, { unique: true });
 
+const dislikedSongSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  trackTitle: String,
+  trackAuthor: String,
+  trackUrl: String,
+  trackKey: { type: String, required: true },
+  dislikedAt: { type: Date, default: Date.now },
+});
+dislikedSongSchema.index({ userId: 1, trackKey: 1 }, { unique: true });
+
 function cleanAuthor(author) {
   return (author || "").replace(/\s*-\s*Topic$/i, "").trim();
 }
@@ -62,6 +72,7 @@ const Playlist = mongoose.model("Playlist", playlistSchema);
 const History = mongoose.model("History", historySchema);
 const LikedSong = mongoose.model("LikedSong", likedSongSchema);
 const TrackPlay = mongoose.model("TrackPlay", trackPlaySchema);
+const DislikedSong = mongoose.model("DislikedSong", dislikedSongSchema);
 
 async function initDB() {
   const uri = process.env.MONGODB_URI || "mongodb://localhost:27017/musicbot";
@@ -365,6 +376,46 @@ async function getUserPlaylists(guildId, userId) {
   return Playlist.find({ guildId, userId }).sort({ name: 1 }).lean();
 }
 
+// ── Disliked Songs ──────────────────────────────────────────────────────
+async function addDislikedSong(userId, track) {
+  await whenReady(() => {});
+  const title = track.info?.title || track.track_title || "";
+  const author = track.info?.author || track.track_author || "";
+  const url = track.info?.uri || track.track_url || "";
+  const key = `${cleanAuthor(author)} - ${title}`.trim();
+  try {
+    await DislikedSong.create({ userId, trackTitle: title, trackAuthor: author, trackUrl: url, trackKey: key });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getDislikedKeys(userId) {
+  await whenReady(() => {});
+  const docs = await DislikedSong.find({ userId }).lean();
+  return new Set(docs.map(d => d.trackKey));
+}
+
+async function getDislikedSongs(userId) {
+  await whenReady(() => {});
+  return DislikedSong.find({ userId }).sort({ dislikedAt: -1 }).lean();
+}
+
+async function removeDislikedSong(userId, trackKey) {
+  await whenReady(() => {});
+  await DislikedSong.deleteOne({ userId, trackKey });
+}
+
+async function removeDislikedSongById(userId, id) {
+  await whenReady(() => {});
+  const songs = await DislikedSong.find({ userId }).sort({ dislikedAt: -1 }).lean();
+  const target = songs[id - 1];
+  if (!target) return null;
+  await DislikedSong.deleteOne({ _id: target._id });
+  return target;
+}
+
 module.exports = {
   initDB,
   updateUserStats,
@@ -389,5 +440,10 @@ module.exports = {
   copyLikedSongs,
   copyPlaylist,
   getUserPlaylists,
+  addDislikedSong,
+  getDislikedKeys,
+  getDislikedSongs,
+  removeDislikedSong,
+  removeDislikedSongById,
 };
 

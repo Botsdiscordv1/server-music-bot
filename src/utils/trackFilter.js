@@ -27,7 +27,13 @@ const EXCLUDE_TERMS = [
   "16bit",
   "16-bit",
   "speedup",
-  "slowed + reverb"
+  "slowed + reverb",
+  "official video",
+  "official music video",
+  "official lyric video",
+  "music video",
+  "dj mix",
+  "mixtape",
 ];
 
 // Retained for backward compatibility
@@ -42,7 +48,13 @@ const EXCLUDE_PATTERNS = [
   /\bspeedup\b/i,
   /\b8[\s-]?bit\b/i,
   /\b16[\s-]?bit\b/i,
-  /\btribute\b/i
+  /\btribute\b/i,
+  /\bofficial\s+(video|music\s+video|lyric\s+video)\b/i,
+  /\bmusic\s+video\b/i,
+  /\bdj\s+mix\b/i,
+  /\bmixtape\b/i,
+  /\b(live|dj|acoustic|studio)\s+set\b/i,
+  /\bset\s+mix\b/i,
 ];
 
 // ── Soft variant words (used only for scoring / deprioritisation) ─────────────
@@ -64,8 +76,8 @@ const OFFICIAL_AUTHOR_PATTERNS = [
 ];
 
 const OFFICIAL_TITLE_PATTERNS = [
-  /\bofficial\s+(audio|video|lyric\s+video|music\s+video)\b/i,
-  /\b(music\s+video|audio)\b/i,
+  /\bofficial\s+audio\b/i,
+  /\baudio\b/i,
 ];
 
 // ── Public API ────────────────────────────────────────────────────────────────

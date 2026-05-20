@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const { requireVoiceChannel } = require("../../utils/checks");
 const { errorEmbed } = require("../../utils/embeds");
-const { getLikedSongs, getMostPlayedTracks } = require("../../database");
+const { getLikedSongs, getMostPlayedTracks, getDislikedKeys } = require("../../database");
 const { isExcluded, isVariant } = require("../../utils/trackFilter");
 const { generateSet } = require("../../services/djEngine");
 
@@ -50,14 +50,22 @@ async function generateBatch(player, count = 10) {
     playedTitles.has(t.info?.title?.toLowerCase());
 
   const userId = player.requesterId;
-  if (!userId) return [];
+  if (!userId) return { batch: [], profile: null };
 
   const likedSongs = await getLikedSongs(userId);
-  if (!likedSongs.length) return [];
+  if (!likedSongs.length) return { batch: [], profile: null };
 
-  const result = await generateSet(player, likedSongs);
+  // Filter out disliked songs
+  const dislikedKeys = await getDislikedKeys(userId);
+  const filtered = likedSongs.filter(s => {
+    const key = `${s.track_author} - ${s.track_title}`.trim();
+    return !dislikedKeys.has(key);
+  });
+  if (!filtered.length) return { batch: [], profile: null };
 
-  if (!result.tracks.length) return [];
+  const result = await generateSet(player, filtered);
+
+  if (!result.tracks.length) return { batch: [], profile: null };
 
   const batch = [];
   const usedTitleKeys = new Set();
@@ -85,14 +93,94 @@ async function generateBatch(player, count = 10) {
 
   player._djPlayedIds = playedIds;
   player._djPlayedTitles = playedTitles;
-  return batch;
+  return { batch, profile: result.profile };
+}
+
+const TTS_PRONUNCIATION = [
+  [/\b6ix9ine\b/gi, "six nine"],
+  [/\b6ix\b/gi, "six"],
+  [/\b9ine\b/gi, "nine"],
+  [/\b21 savage\b/gi, "twenty one savage"],
+  [/\b24k\s?goldn\b/gi, "twenty four karat golden"],
+  [/\b2pac\b/gi, "two pac"],
+  [/\b50 cent\b/gi, "fifty cent"],
+  [/\b6lack\b/gi, "black"],
+  [/\$ap\b/gi, "money ap"],
+  [/\bXXXTentacion\b/gi, "triple ex tentacion"],
+  [/\bHalsey\b/gi, "halsey"],
+  [/\bB[oó]y Hars[hi]ss\b/gi, "boy harshish"],
+  [/\bMitski\b/gi, "mitski"],
+  [/\bGrimes\b/gi, "grimes"],
+  [/\bKacey\s+Musgraves\b/gi, "kacey musgraves"],
+  [/\bJoji\b/gi, "joji"],
+  [/\bRina\s+Sawayama\b/gi, "rina sawayama"],
+  [/\bJPEGMafia\b/gi, "jpeg mafia"],
+  [/\bDeath\s+Grips\b/gi, "death grips"],
+  [/\bTyler,\s*the\s+Creator\b/gi, "tyler the creator"],
+  [/\bChildish\s+Gambino\b/gi, "childish gambino"],
+  [/\bMgmt\b/gi, "em gee em tee"],
+];
+
+function fixTTS(text) {
+  let t = text.replace(/\*\*/g, "").replace(/[🎙️…]/g, "").trim();
+  for (const [pattern, replacement] of TTS_PRONUNCIATION) {
+    t = t.replace(pattern, replacement);
+  }
+  return t;
+}
+
+function ttsUrl(text) {
+  return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=es&q=${encodeURIComponent(fixTTS(text).slice(0, 200))}`;
+}
+
+async function queueTTS(player, text) {
+  try {
+    const result = await player.search({ query: ttsUrl(text) }, { username: "DJ", id: "dj" });
+    if (result?.tracks?.length) {
+      const ttsTrack = result.tracks[0];
+      ttsTrack._djIntro = true;
+      return ttsTrack;
+    }
+  } catch {}
+  return null;
+}
+
+function generateSetDescription(profile, batch) {
+  const genres = profile?.dominantGenres || [];
+  const firstTrack = batch[0];
+  const firstArtist = firstTrack?.info?.author || "";
+
+  const bpmDesc = profile?.avgBpm
+    ? (profile.avgBpm > 120 ? "ritmo rápido" : profile.avgBpm > 90 ? "ritmo medio" : "ritmo lento")
+    : "";
+
+  const energyDesc = profile?.avgEnergy != null
+    ? (profile.avgEnergy > 0.7 ? "alta energía" : profile.avgEnergy > 0.4 ? "energía media" : "ambiente relajado")
+    : "";
+
+  const templates = [];
+
+  if (genres.length) {
+    templates.push(
+      `🎙️ Mezcla de ${genres.slice(0, 3).join(" y ")}, con ${bpmDesc || "buen ritmo"}. Arrancando con **${firstArtist}**…`,
+      `🎙️ La sesión de hoy trae ${genres.slice(0, 2).join(" y ") || "buena música"}, ${energyDesc}. **${firstArtist}** abre el set.`,
+      `🎙️ De vuelta con ${genres[0] || "música"}, ${bpmDesc}. Empezamos con **${firstArtist}**…`,
+    );
+  }
+
+  templates.push(
+    `🎙️ Set listo para ti. **${firstArtist}** nos pone en ambiente…`,
+    `🎙️ Nueva tanda de canciones, arrancando con **${firstArtist}**.`,
+  );
+
+  return templates[Math.floor(Math.random() * templates.length)];
 }
 
 async function refillQueue(player, client) {
   if (player._djRefilling) return;
   player._djRefilling = true;
   try {
-    const batch = await generateBatch(player, 10);
+    const { batch, profile } = await generateBatch(player, 10);
     if (batch.length === 0) {
       if (player.queue.tracks.length === 0) player._djMode = false;
       return;
@@ -102,7 +190,38 @@ async function refillQueue(player, client) {
       if (t.info?.identifier) addedIds.add(t.info.identifier);
     }
     player._djAddedIds = addedIds;
+
+    // Queue TTS intro then the batch
+    const setNum = player._djSetNumber || 1;
+    const description = generateSetDescription(profile, batch);
+    const ttsTrack = await queueTTS(player, description);
+    if (ttsTrack) {
+      player.queue.add(ttsTrack);
+    }
     player.queue.add(batch);
+
+    // Show set list embed with DJ description
+    const lines = batch.map((t, i) => {
+      const title = t.info?.title || "Unknown";
+      const author = t.info?.author || "Unknown";
+      return `\`${i + 1}.\` **${title}** — ${author}`;
+    });
+    const setEmbed = new EmbedBuilder()
+      .setColor(0x1db954)
+      .setAuthor({ name: `🎧 Set #${setNum}` })
+      .setDescription(`${description}\n\n${lines.join("\n")}`)
+      .setFooter({ text: `${player._djTracksInSet || 0}/${player._djSetSize || 10} · +${batch.length} canciones` });
+
+    const channel = client.channels.cache.get(player.textChannelId);
+    if (channel) {
+      await channel.send({ embeds: [setEmbed] }).catch(() => {});
+    }
+
+    // If queue was empty, resume playback
+    if (!player.playing && !player.paused && batch.length > 0) {
+      await player.play({ paused: false }).catch(() => {});
+      player._trackStartTime = Date.now();
+    }
   } catch (err) {
     console.error("[DJ] refillQueue error:", err);
     if (player.queue.tracks.length === 0) player._djMode = false;
@@ -111,8 +230,9 @@ async function refillQueue(player, client) {
   }
 }
 
-async function initDJ(player, userId) {
+async function initDJ(player, userId, client) {
   player._djMode = true;
+  player._djArtistMode = false;
   player.requesterId = userId;
   player._djPositiveSeeds = [];
   player._djNegativeSeeds = [];
@@ -123,9 +243,12 @@ async function initDJ(player, userId) {
   player._djAddedIds = new Set();
   player._djLikedUrls = new Set();
   player._djLikedSongs = [];
+  player._djSetNumber = 1;
+  player._djTracksInSet = 0;
+  player._djSetSize = 10;
 
   await loadSeedsFromDB(player);
-  await refillQueue(player);
+  await refillQueue(player, client);
 }
 
 module.exports = {
@@ -157,6 +280,7 @@ module.exports = {
 
       if (player._djMode) {
         player._djMode = false;
+        player._djArtistMode = false;
         const djIds = player._djAddedIds || new Set();
         const kept = player.queue.tracks.filter(t => !djIds.has(t.info?.identifier));
         if (typeof player.queue.splice === "function") {
@@ -182,7 +306,7 @@ module.exports = {
       }
 
       if (isPlaying) {
-        await initDJ(player, interaction.user.id);
+        await initDJ(player, interaction.user.id, client);
 
         const embed = new EmbedBuilder()
           .setColor(0x1db954)
@@ -198,7 +322,7 @@ module.exports = {
       } else {
         if (typeof player.stopPlaying === "function") await player.stopPlaying();
 
-        await initDJ(player, interaction.user.id);
+        await initDJ(player, interaction.user.id, client);
 
         if (player.queue.tracks.length === 0) {
           return interaction.editReply({ embeds: [errorEmbed("No se pudieron generar recomendaciones. Agrega canciones a ❤️ Tus Me Gusta primero.")] });

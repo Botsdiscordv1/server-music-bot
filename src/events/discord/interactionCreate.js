@@ -3,7 +3,7 @@ const { errorEmbed, successEmbed, queueEmbed, lyricsEmbed } = require("../../uti
 const { getLyrics, formatLyricsForEmbed } = require("../../services/lrclib");
 const { startKaraoke } = require("../../commands/music/karaoke");
 const searchCommand = require("../../commands/music/search");
-const { addLikedSong, isSongInLikes } = require("../../database");
+const { addLikedSong, isSongInLikes, addDislikedSong } = require("../../database");
 const { getTrackKey } = require("../../commands/music/dj");
 const { getAutoplayTrack } = require("../../services/autoplay");
 
@@ -149,6 +149,7 @@ async function handlePlaybackButton(interaction, client) {
             player._djPositiveSeeds = (player._djPositiveSeeds || []).filter(s => s.key !== key);
             if (player._djPlayedIds) player._djPlayedIds.delete(player.queue.current.info?.identifier);
             if (player._djPlayedTitles) player._djPlayedTitles.delete(player.queue.current.info?.title?.toLowerCase());
+            addDislikedSong(interaction.user.id, player.queue.current).catch(() => {});
           }
         }
         if (player.queue.tracks.length > 0) {
@@ -231,7 +232,10 @@ case "playback_lyrics": {
           if (!track) {
             return interaction.reply({ embeds: [errorEmbed("No hay ninguna canción reproduciéndose.")], flags: MessageFlags.Ephemeral });
           }
-          await addLikedSong(interaction.user.id, track);
+          const added = await addLikedSong(interaction.user.id, track);
+          if (!added) {
+            return interaction.reply({ embeds: [errorEmbed(`**${track.info.title}** ya está en Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
+          }
           if (player._djMode) {
             const key = getTrackKey(track);
             if (key && !(player._djPositiveSeeds || []).some(s => s.key === key)) {

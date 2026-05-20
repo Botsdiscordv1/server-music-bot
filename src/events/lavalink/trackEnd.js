@@ -1,4 +1,7 @@
 const { refillQueue } = require("../../commands/music/dj");
+const { refillArtistQueue } = require("../../commands/music/djArtist");
+
+const SET_SIZE = 10;
 
 module.exports = {
   name: "trackEnd",
@@ -19,6 +22,9 @@ module.exports = {
     player._lyricsCache = null;
 
     if (player._djMode) {
+      // Skip intro/TTS tracks — don't count toward set
+      if (track?._djIntro) return;
+
       // Mark ended track as played for dedup
       if (track) {
         if (!player._djPlayedIds) player._djPlayedIds = new Set();
@@ -39,8 +45,17 @@ module.exports = {
         }
       }
 
-      if (player.queue.tracks.length <= 4) {
-        refillQueue(player, client).catch(e => console.error("[DJ refill] Error:", e.message));
+      // Track set progress — refill when queue is empty and at least 1 track played
+      player._djTracksInSet = (player._djTracksInSet || 0) + 1;
+      if (player.queue.tracks.length === 0) {
+        player._djTracksInSet = 0;
+        player._djSetNumber = (player._djSetNumber || 0) + 1;
+
+        if (player._djArtistMode) {
+          refillArtistQueue(player, client).catch(e => console.error("[DJ Artist refill] Error:", e.message));
+        } else {
+          refillQueue(player, client).catch(e => console.error("[DJ refill] Error:", e.message));
+        }
       }
     }
   },

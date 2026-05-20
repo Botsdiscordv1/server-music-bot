@@ -1,5 +1,6 @@
 const { getRecommendations, searchTracks } = require("./spotify");
 const { isExcluded, isVariant: tfIsVariant, pickBest: tfPickBest } = require("../utils/trackFilter");
+const { getDislikedKeys } = require("../database");
 
 const VARIANT_WORDS = [
   "acoustic", "live", "remix", "cover", "instrumental", "sped ?up", "slowed ?down",
@@ -41,7 +42,7 @@ function normAuthor(author) {
     .trim();
 }
 
-function buildSkipData(player, currentTrack) {
+function buildSkipData(player, currentTrack, dislikedKeys = new Set()) {
   const skipIds = new Set();
   const skipBases = new Set();
   const skipFull = new Set();
@@ -53,16 +54,20 @@ function buildSkipData(player, currentTrack) {
       skipFull.add(`${coreTitle(t.info.title)}|${normAuthor(t.info.author || "")}`);
     }
   }
-  return { skipIds, skipBases, skipFull };
+  return { skipIds, skipBases, skipFull, dislikedKeys };
 }
 
-function isDuplicate(candidate, { skipIds, skipBases, skipFull }) {
+function isDuplicate(candidate, { skipIds, skipBases, skipFull, dislikedKeys }) {
   if (skipIds.has(candidate.info.identifier)) return true;
   const cTitle = coreTitle(candidate.info.title || "");
   const cAuthor = normAuthor(candidate.info.author || "");
   const cBase = coreTitle(stripVariantSuffix(candidate.info.title || ""));
   if (skipFull.has(`${cTitle}|${cAuthor}`)) return true;
   if (skipBases.has(cBase)) return true;
+  if (dislikedKeys?.size) {
+    const key = `${candidate.info.author || ""} - ${candidate.info.title || ""}`.trim();
+    if (dislikedKeys.has(key.toLowerCase()) || dislikedKeys.has(key)) return true;
+  }
   return false;
 }
 
@@ -75,7 +80,13 @@ function shouldDiscard(title) {
 }
 
 async function getAutoplayTrack(player, currentTrack) {
-  const skipData = buildSkipData(player, currentTrack);
+  let dislikedKeys = new Set();
+  if (player.requesterId) {
+    try {
+      dislikedKeys = await getDislikedKeys(player.requesterId);
+    } catch {}
+  }
+  const skipData = buildSkipData(player, currentTrack, dislikedKeys);
 
   const spotifyResult = await trySpotify(player, currentTrack, skipData);
   if (spotifyResult) return spotifyResult;
