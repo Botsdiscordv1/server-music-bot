@@ -19,6 +19,7 @@ const http = require("http");
 const { WebSocket } = require("ws");
 const { createClient } = require("./client");
 const { initDB } = require("./database");
+const { getGoogleTTSUrl } = require("./utils/ttsService");
 
 function testWS(url, headers) {
   return new Promise((resolve) => {
@@ -38,6 +39,72 @@ function testWS(url, headers) {
 
 const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer((req, res) => {
+  const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  if (urlObj.pathname === "/api/tts") {
+    const text = urlObj.searchParams.get("text");
+    if (!text) {
+      res.writeHead(400, { "Content-Type": "text/plain" });
+      res.end("Missing text parameter");
+      return;
+    }
+
+    const fallbackUrl = getGoogleTTSUrl(text);
+    const kokoroApiUrl = process.env.KOKORO_API_URL;
+
+    if (!kokoroApiUrl) {
+      console.warn("[Proxy TTS] KOKORO_API_URL is not set. Redirecting to Google TTS fallback.");
+      res.writeHead(302, { Location: fallbackUrl });
+      res.end();
+      return;
+    }
+
+    const voice = urlObj.searchParams.get("voice") || process.env.KOKORO_VOICE || "ef_dora";
+    
+    // Call Kokoro API
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 seconds timeout
+
+    const apiUrl = kokoroApiUrl.endsWith("/") ? kokoroApiUrl.slice(0, -1) : kokoroApiUrl;
+    const targetUrl = `${apiUrl}/v1/audio/speech`;
+
+    fetch(targetUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "kokoro",
+        input: text,
+        voice: voice,
+        // kokoro-onnx returns WAV natively (no ffmpeg needed)
+        response_format: "wav",
+      }),
+      signal: controller.signal,
+    })
+    .then((response) => {
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        throw new Error(`Kokoro returned status ${response.status}`);
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "audio/wav",
+        "Cache-Control": "public, max-age=31536000",
+      });
+
+      const { Readable } = require("stream");
+      Readable.fromWeb(response.body).pipe(res);
+    })
+    .catch((err) => {
+      clearTimeout(timeoutId);
+      console.error(`[Proxy TTS] Kokoro API failed or timed out (${err.message}). Redirecting to Google TTS.`);
+      res.writeHead(302, { Location: fallbackUrl });
+      res.end();
+    });
+    return;
+  }
+
   if (req.url === "/test-lavalink") {
     const t = [];
     const theDns = require("dns");
@@ -67,3 +134,5 @@ async function main() {
 }
 
 main().catch(console.error);
+
+

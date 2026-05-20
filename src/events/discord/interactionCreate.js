@@ -234,7 +234,12 @@ case "playback_lyrics": {
           }
           const added = await addLikedSong(interaction.user.id, track);
           if (!added) {
-            return interaction.reply({ embeds: [errorEmbed(`**${track.info.title}** ya está en Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
+            try {
+              await interaction.user.send({ embeds: [successEmbed(`**${track.info.title}** ya está en Tus Me Gusta`)] });
+              return interaction.reply({ content: "Revisa tus mensajes privados.", flags: MessageFlags.Ephemeral });
+            } catch (err) {
+              return interaction.reply({ embeds: [errorEmbed(`**${track.info.title}** ya está en Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
+            }
           }
           if (player._djMode) {
             const key = getTrackKey(track);
@@ -322,15 +327,11 @@ async function updateNowPlayingButtons(player, client) {
     .setStyle(player._shuffleEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
 
   const rowComp = [backBtn, pauseBtn, skipBtn, stopBtn];
-  if (!trackLiked) {
-    rowComp.push(new ButtonBuilder()
-      .setCustomId("playback_like")
-      .setEmoji("🤍")
-      .setStyle(ButtonStyle.Secondary)
-    );
-  } else {
-    rowComp.push(randomBtn);
-  }
+  rowComp.push(new ButtonBuilder()
+    .setCustomId("playback_like")
+    .setEmoji("🤍")
+    .setStyle(trackLiked ? ButtonStyle.Success : ButtonStyle.Secondary)
+  );
   const row = new ActionRowBuilder().addComponents(rowComp);
 
   // ── Row 2: Queue + Autoplay/Dislike + Random + optional Lyrics/LSync ─
@@ -339,8 +340,7 @@ async function updateNowPlayingButtons(player, client) {
     .setEmoji("<:lista:1504760412221079553>")
     .setStyle(ButtonStyle.Secondary);
 
-  const isLiked = isSongInLikes(player._djLikedSongs || [], player.queue.current);
-  const showDislike = player._djMode && !isLiked;
+  const showDislike = player._djMode;
   const centerBtn = showDislike
     ? new ButtonBuilder()
         .setCustomId("playback_dislike")
@@ -353,10 +353,7 @@ async function updateNowPlayingButtons(player, client) {
           .setStyle(player._autoplayEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
       : null;
 
-  const row2Comp = [];
-  if (!trackLiked) {
-    row2Comp.push(randomBtn);
-  }
+  const row2Comp = [randomBtn];
   if (centerBtn) {
     row2Comp.push(centerBtn);
   }

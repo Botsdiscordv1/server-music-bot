@@ -3,55 +3,9 @@ const { requireVoiceChannel } = require("../../utils/checks");
 const { errorEmbed } = require("../../utils/embeds");
 const { getLikedSongs, getDislikedKeys } = require("../../database");
 const { generateArtistSet } = require("../../services/djEngine");
+const { queueTTS } = require("../../utils/ttsService");
 
-const TTS_PRONUNCIATION = [
-  [/\b6ix9ine\b/gi, "six nine"],
-  [/\b6ix\b/gi, "six"],
-  [/\b9ine\b/gi, "nine"],
-  [/\b21 savage\b/gi, "twenty one savage"],
-  [/\b24k\s?goldn\b/gi, "twenty four karat golden"],
-  [/\b2pac\b/gi, "two pac"],
-  [/\b50 cent\b/gi, "fifty cent"],
-  [/\b6lack\b/gi, "black"],
-  [/\$ap\b/gi, "money ap"],
-  [/\bXXXTentacion\b/gi, "triple ex tentacion"],
-  [/\bHalsey\b/gi, "halsey"],
-  [/\bB[oó]y Hars[hi]ss\b/gi, "boy harshish"],
-  [/\bMitski\b/gi, "mitski"],
-  [/\bGrimes\b/gi, "grimes"],
-  [/\bKacey\s+Musgraves\b/gi, "kacey musgraves"],
-  [/\bJoji\b/gi, "joji"],
-  [/\bRina\s+Sawayama\b/gi, "rina sawayama"],
-  [/\bJPEGMafia\b/gi, "jpeg mafia"],
-  [/\bDeath\s+Grips\b/gi, "death grips"],
-  [/\bTyler,\s*the\s+Creator\b/gi, "tyler the creator"],
-  [/\bChildish\s+Gambino\b/gi, "childish gambino"],
-  [/\bMgmt\b/gi, "em gee em tee"],
-];
-
-function fixTTS(text) {
-  let t = text.replace(/\*\*/g, "").replace(/[🎙️…]/g, "").trim();
-  for (const [pattern, replacement] of TTS_PRONUNCIATION) {
-    t = t.replace(pattern, replacement);
-  }
-  return t;
-}
-
-function ttsUrl(text) {
-  return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=es&q=${encodeURIComponent(fixTTS(text).slice(0, 200))}`;
-}
-
-async function queueTTS(player, text) {
-  try {
-    const result = await player.search({ query: ttsUrl(text) }, { username: "DJ", id: "dj" });
-    if (result?.tracks?.length) {
-      const ttsTrack = result.tracks[0];
-      ttsTrack._djIntro = true;
-      return ttsTrack;
-    }
-  } catch {}
-  return null;
-}
+// Local TTS logic replaced by central ttsService.js
 
 async function generateBatch(player, artistName, count = 10) {
   const playedIds = player._djPlayedIds || new Set();
@@ -83,6 +37,14 @@ async function generateBatch(player, artistName, count = 10) {
   for (const track of result.tracks) {
     if (batch.length >= count) break;
     if (isPlayed(track)) continue;
+
+    let author = track.info?.author || track.track_author || track.author || "";
+    author = author.replace(/\s*-\s*Topic$/i, "").trim();
+    const title = track.info?.title || track.track_title || track.title || "";
+    const trackKey = `${author} - ${title}`.trim();
+
+    if (dislikedKeys.has(trackKey.toLowerCase()) || dislikedKeys.has(trackKey)) continue;
+
     const titleKey = (track.info?.title || "").toLowerCase();
     if (usedTitleKeys.has(titleKey)) continue;
     batch.push(track);

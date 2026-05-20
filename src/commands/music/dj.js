@@ -4,9 +4,11 @@ const { errorEmbed } = require("../../utils/embeds");
 const { getLikedSongs, getMostPlayedTracks, getDislikedKeys } = require("../../database");
 const { isExcluded, isVariant } = require("../../utils/trackFilter");
 const { generateSet } = require("../../services/djEngine");
+const { queueTTS } = require("../../utils/ttsService");
 
 function getTrackKey(track) {
-  const author = track.info?.author || track.track_author || track.author || "";
+  let author = track.info?.author || track.track_author || track.author || "";
+  author = author.replace(/\s*-\s*Topic$/i, "").trim();
   const title = track.info?.title || track.track_title || track.title || "";
   return `${author} - ${title}`.trim();
 }
@@ -75,6 +77,9 @@ async function generateBatch(player, count = 10) {
     if (isPlayed(track)) continue;
     if (shouldDiscard(track.info?.title || "")) continue;
 
+    const trackKey = getTrackKey(track);
+    if (dislikedKeys.has(trackKey.toLowerCase()) || dislikedKeys.has(trackKey)) continue;
+
     const titleKey = (track.info?.title || "").toLowerCase();
     if (usedTitleKeys.has(titleKey)) continue;
 
@@ -96,54 +101,7 @@ async function generateBatch(player, count = 10) {
   return { batch, profile: result.profile };
 }
 
-const TTS_PRONUNCIATION = [
-  [/\b6ix9ine\b/gi, "six nine"],
-  [/\b6ix\b/gi, "six"],
-  [/\b9ine\b/gi, "nine"],
-  [/\b21 savage\b/gi, "twenty one savage"],
-  [/\b24k\s?goldn\b/gi, "twenty four karat golden"],
-  [/\b2pac\b/gi, "two pac"],
-  [/\b50 cent\b/gi, "fifty cent"],
-  [/\b6lack\b/gi, "black"],
-  [/\$ap\b/gi, "money ap"],
-  [/\bXXXTentacion\b/gi, "triple ex tentacion"],
-  [/\bHalsey\b/gi, "halsey"],
-  [/\bB[oó]y Hars[hi]ss\b/gi, "boy harshish"],
-  [/\bMitski\b/gi, "mitski"],
-  [/\bGrimes\b/gi, "grimes"],
-  [/\bKacey\s+Musgraves\b/gi, "kacey musgraves"],
-  [/\bJoji\b/gi, "joji"],
-  [/\bRina\s+Sawayama\b/gi, "rina sawayama"],
-  [/\bJPEGMafia\b/gi, "jpeg mafia"],
-  [/\bDeath\s+Grips\b/gi, "death grips"],
-  [/\bTyler,\s*the\s+Creator\b/gi, "tyler the creator"],
-  [/\bChildish\s+Gambino\b/gi, "childish gambino"],
-  [/\bMgmt\b/gi, "em gee em tee"],
-];
-
-function fixTTS(text) {
-  let t = text.replace(/\*\*/g, "").replace(/[🎙️…]/g, "").trim();
-  for (const [pattern, replacement] of TTS_PRONUNCIATION) {
-    t = t.replace(pattern, replacement);
-  }
-  return t;
-}
-
-function ttsUrl(text) {
-  return `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=es&q=${encodeURIComponent(fixTTS(text).slice(0, 200))}`;
-}
-
-async function queueTTS(player, text) {
-  try {
-    const result = await player.search({ query: ttsUrl(text) }, { username: "DJ", id: "dj" });
-    if (result?.tracks?.length) {
-      const ttsTrack = result.tracks[0];
-      ttsTrack._djIntro = true;
-      return ttsTrack;
-    }
-  } catch {}
-  return null;
-}
+// Local TTS logic replaced by central ttsService.js
 
 function generateSetDescription(profile, batch) {
   const genres = profile?.dominantGenres || [];

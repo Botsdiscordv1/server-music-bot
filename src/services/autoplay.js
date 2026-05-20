@@ -65,7 +65,9 @@ function isDuplicate(candidate, { skipIds, skipBases, skipFull, dislikedKeys }) 
   if (skipFull.has(`${cTitle}|${cAuthor}`)) return true;
   if (skipBases.has(cBase)) return true;
   if (dislikedKeys?.size) {
-    const key = `${candidate.info.author || ""} - ${candidate.info.title || ""}`.trim();
+    let author = candidate.info.author || "";
+    author = author.replace(/\s*-\s*Topic$/i, "").trim();
+    const key = `${author} - ${candidate.info.title || ""}`.trim();
     if (dislikedKeys.has(key.toLowerCase()) || dislikedKeys.has(key)) return true;
   }
   return false;

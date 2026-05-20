@@ -67,15 +67,11 @@ module.exports = {
 
       // ── Row 1 setup ───────────────────────────────────────────────────────
       const rowComp = [backBtn, pauseBtn, skipBtn, stopBtn];
-      if (!trackLiked) {
-        rowComp.push(new ButtonBuilder()
-          .setCustomId("playback_like")
-          .setEmoji("🤍")
-          .setStyle(ButtonStyle.Secondary)
-        );
-      } else {
-        rowComp.push(randomBtn);
-      }
+      rowComp.push(new ButtonBuilder()
+        .setCustomId("playback_like")
+        .setEmoji("🤍")
+        .setStyle(trackLiked ? ButtonStyle.Success : ButtonStyle.Secondary)
+      );
       const row = new ActionRowBuilder().addComponents(rowComp);
 
       // ── Row 2 setup ───────────────────────────────────────────────────────
@@ -84,8 +80,7 @@ module.exports = {
         .setEmoji("<:lista:1504760412221079553>")
         .setStyle(ButtonStyle.Secondary);
 
-      const isLiked = isSongInLikes(player._djLikedSongs || [], track);
-      const showDislike = player._djMode && !isLiked;
+      const showDislike = player._djMode;
       const centerBtn = showDislike
         ? new ButtonBuilder()
             .setCustomId("playback_dislike")
@@ -98,10 +93,7 @@ module.exports = {
               .setStyle(player._autoplayEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
           : null;
 
-      const row2Components = [];
-      if (!trackLiked) {
-        row2Components.push(randomBtn);
-      }
+      const row2Components = [randomBtn];
       if (centerBtn) {
         row2Components.push(centerBtn);
       }
@@ -188,10 +180,7 @@ module.exports = {
           player._lyricsCache = hasLyrics ? lyricsCheck : null;
           
           if (player.nowPlayingMessage?.editable && (player._lyricsAvailable || player._lsyncAvailable)) {
-            const row2Comp = [];
-            if (!trackLiked) {
-              row2Comp.push(randomBtn);
-            }
+            const row2Comp = [randomBtn];
             if (centerBtn) {
               row2Comp.push(centerBtn);
             }
