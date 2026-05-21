@@ -301,7 +301,7 @@ async function resolveLikedTrack(player, song) {
   return null;
 }
 
-async function resolveRecommendations(player, selectedSongs, profile, enriched, likedSongs, count = 4) {
+async function spotifyRecommendations(player, selectedSongs, profile, enriched, likedSongs, count = 4) {
   const songIndexByKey = new Map();
   likedSongs.forEach((s, i) => {
     songIndexByKey.set(`${authorKey(s.track_author)}::${titleKey(s.track_title)}`, i);
@@ -362,20 +362,20 @@ async function resolveRecommendations(player, selectedSongs, profile, enriched, 
 }
 
 /**
- * Falls back to YouTube-based related tracks when Spotify recommendations produce 0 results.
- * Searches for each selected song's author on YouTube Music and picks non-duplicate results.
+ * Primary recommendation source. Searches YouTube Music for related tracks by the same artists.
+ * Falls back to Spotify if not enough results.
  */
-async function fallbackRecommendations(player, selectedSongs, likedSongs, count = 4) {
+async function ytmRecommendations(player, selectedSongs, likedSongs, count = 4) {
   const likedKeys = new Set(likedSongs.map(s => `${authorKey(s.track_author)}::${titleKey(s.track_title)}`));
   const resolved = [];
   const usedTitleKeys = new Set();
 
+  // First pass: search by artist name for top tracks
   const authorQueries = [...new Set(selectedSongs.map(s => s.track_author).filter(Boolean))];
   shuffle(authorQueries);
 
   for (const author of authorQueries) {
     if (resolved.length >= count) break;
-
     const query = `${author} - top tracks`;
     try {
       const result = await player.search(
@@ -383,7 +383,6 @@ async function fallbackRecommendations(player, selectedSongs, likedSongs, count 
         { username: "DJ", id: "dj" }
       );
       if (!result?.tracks?.length) continue;
-
       let taken = 0;
       for (const track of result.tracks) {
         if (resolved.length >= count || taken >= 2) break;
@@ -397,6 +396,34 @@ async function fallbackRecommendations(player, selectedSongs, likedSongs, count 
         taken++;
       }
     } catch {}
+  }
+
+  // Second pass: search by song title for more variety
+  if (resolved.length < count) {
+    const songQueries = shuffle(selectedSongs)
+      .map(s => s.track_title)
+      .filter(Boolean)
+      .slice(0, 6);
+    for (const title of songQueries) {
+      if (resolved.length >= count) break;
+      try {
+        const result = await player.search(
+          { query: title, source: "ytmsearch" },
+          { username: "DJ", id: "dj" }
+        );
+        if (!result?.tracks?.length) continue;
+        for (const track of result.tracks) {
+          if (resolved.length >= count) break;
+          const t = track.info?.title || "";
+          if (shouldExclude(t)) continue;
+          const key = `${authorKey(track.info?.author || "")}::${titleKey(t)}`;
+          if (usedTitleKeys.has(key)) continue;
+          if (likedKeys.has(key)) continue;
+          resolved.push(track);
+          usedTitleKeys.add(key);
+        }
+      } catch {}
+    }
   }
 
   return resolved;
@@ -524,10 +551,10 @@ async function generateSet(player, likedSongs) {
     }
   }
 
-  let recommendedTracks = await resolveRecommendations(player, selectedSongs, profile, enriched, likedSongs, 4);
+  let recommendedTracks = await ytmRecommendations(player, selectedSongs, likedSongs, 4);
 
   if (recommendedTracks.length < 4) {
-    const fallback = await fallbackRecommendations(player, selectedSongs, likedSongs, 4 - recommendedTracks.length);
+    const fallback = await spotifyRecommendations(player, selectedSongs, profile, enriched, likedSongs, 4 - recommendedTracks.length);
     recommendedTracks = [...recommendedTracks, ...fallback];
   }
 
@@ -574,9 +601,9 @@ async function generateArtistSet(player, likedSongs, artistName) {
     }
   }
 
-  let recommendedTracks = await resolveRecommendations(player, seedSongs, profile, enriched, likedSongs, 5);
+  let recommendedTracks = await ytmRecommendations(player, seedSongs, likedSongs, 5);
   if (recommendedTracks.length < 5) {
-    const fallback = await fallbackRecommendations(player, seedSongs, likedSongs, 5 - recommendedTracks.length);
+    const fallback = await spotifyRecommendations(player, seedSongs, profile, enriched, likedSongs, 5 - recommendedTracks.length);
     recommendedTracks = [...recommendedTracks, ...fallback];
   }
 
