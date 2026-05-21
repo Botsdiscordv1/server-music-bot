@@ -289,7 +289,7 @@ async function refillQueue(player, client) {
 
     const channel = client.channels.cache.get(player.textChannelId);
     if (channel) {
-      await channel.send({ embeds: [setEmbed] }).catch(() => {});
+      await channel.send({ embeds: [setEmbed], flags: MessageFlags.SuppressNotifications }).catch(() => {});
     }
 
     // If queue was empty, resume playback

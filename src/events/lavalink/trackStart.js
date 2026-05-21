@@ -104,7 +104,7 @@ module.exports = {
       const msg = await channel.send({
         embeds: [nowPlayingEmbed(track, player, 0)],
         components: [row, row2],
-        flags: [MessageFlags.SuppressNotifications],
+        flags: MessageFlags.SuppressNotifications,
       });
 
 

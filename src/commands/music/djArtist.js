@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const { errorEmbed } = require("../../utils/embeds");
 const { getLikedSongs, getDislikedKeys } = require("../../database");
 const { generateArtistSet } = require("../../services/djEngine");
@@ -150,7 +150,7 @@ async function refillArtistQueue(player, client) {
           channel.send({ embeds: [new EmbedBuilder()
             .setColor(0xff6b6b)
             .setDescription(`⏹️ No hay más canciones de **${artistName}** en Tus Me Gusta. Modo Artista desactivado.`)
-          ]}).catch(() => {});
+          ], flags: MessageFlags.SuppressNotifications }).catch(() => {});
         }
       }
       return;

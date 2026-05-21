@@ -160,7 +160,7 @@ async function handlePlaybackButton(interaction, client) {
             await interaction.followUp({ content: "🎧 Ya se está armando un nuevo set… espera un momento.", flags: MessageFlags.Ephemeral }).catch(() => {});
           } else {
             const channel = client.channels.cache.get(player.textChannelId);
-            if (channel) channel.send({ content: "🎧 Armando nuevo set… se reproducirá automáticamente cuando esté listo." }).catch(() => {});
+            if (channel) channel.send({ content: "🎧 Armando nuevo set… se reproducirá automáticamente cuando esté listo.", flags: MessageFlags.SuppressNotifications }).catch(() => {});
             await player.skip().catch(() => {});
           }
         } else if (player._autoplayEnabled && player.queue.current) {
@@ -197,7 +197,7 @@ async function handlePlaybackButton(interaction, client) {
             await interaction.followUp({ content: "🎧 Ya se está armando un nuevo set… espera un momento.", flags: MessageFlags.Ephemeral }).catch(() => {});
           } else {
             const channel = client.channels.cache.get(player.textChannelId);
-            if (channel) channel.send({ content: "🎧 Armando nuevo set… se reproducirá automáticamente cuando esté listo." }).catch(() => {});
+            if (channel) channel.send({ content: "🎧 Armando nuevo set… se reproducirá automáticamente cuando esté listo.", flags: MessageFlags.SuppressNotifications }).catch(() => {});
             await player.skip().catch(() => {});
           }
         }

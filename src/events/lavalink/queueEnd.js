@@ -1,3 +1,4 @@
+const { MessageFlags } = require("discord.js");
 const { getAutoplayTrack } = require("../../services/autoplay");
 
 module.exports = {
@@ -32,7 +33,7 @@ module.exports = {
 
           const channel = client.channels.cache.get(player.textChannelId);
           if (channel) {
-            channel.send({ content: `🔁 Autoplay: **${pick.info.title}** — ${pick.info.author}${label}` }).catch(() => {});
+            channel.send({ content: `🔁 Autoplay: **${pick.info.title}** — ${pick.info.author}${label}`, flags: MessageFlags.SuppressNotifications }).catch(() => {});
           }
 
           return;
