@@ -75,6 +75,16 @@ const OFFICIAL_AUTHOR_PATTERNS = [
   /\bofficial\b/i,
 ];
 
+const FAN_AUTHOR_PATTERNS = [
+  /\blyrics?\b/i,
+  /\bfan\s*(channel)?\b/i,
+  /\bchannel\b/i,
+  /\bmusic\s*(hub|daily|club|zone|life|mix)\b/i,
+  /\bcover\b/i,
+  /\bremix\b/i,
+  /^[a-z]*\d{3,}[a-z]*$/i,  // "Channel1234" — random numbers
+];
+
 const OFFICIAL_TITLE_PATTERNS = [
   /\bofficial\s+audio\b/i,
   /\baudio\b/i,
@@ -129,6 +139,9 @@ function scoreTrack(track) {
   // Official author bonus
   if (OFFICIAL_AUTHOR_PATTERNS.some((re) => re.test(author))) score += 100;
 
+  // Fan channel penalty
+  if (FAN_AUTHOR_PATTERNS.some((re) => re.test(author))) score -= 50;
+
   // Official title bonus
   if (OFFICIAL_TITLE_PATTERNS.some((re) => re.test(title))) score += 50;
 
@@ -179,12 +192,29 @@ function pickBest(tracks, isDup, source = "ytmsearch") {
   return variantFallback ? { track: variantFallback, source } : null;
 }
 
+/**
+ * Checks if a track's author looks like it corresponds to the expected artist.
+ * Strips common suffixes ("- Topic", "VEVO", "Official") before comparing.
+ */
+function authorMatchesExpected(track, expectedArtist) {
+  if (!track?.info?.author || !expectedArtist) return false;
+  const author = track.info.author
+    .replace(/\s*-\s*Topic$/i, "")
+    .replace(/\bVEVO\b/gi, "")
+    .replace(/\bofficial\b/gi, "")
+    .trim();
+  const lower = author.toLowerCase();
+  const expected = expectedArtist.toLowerCase();
+  return lower === expected || lower.includes(expected) || expected.includes(lower);
+}
+
 module.exports = {
   isExcluded,
   isVariant,
   scoreTrack,
   filterAndSort,
   pickBest,
+  authorMatchesExpected,
   // Expose lists for external use / testing
   EXCLUDE_TERMS,
   EXCLUDE_PATTERNS,
