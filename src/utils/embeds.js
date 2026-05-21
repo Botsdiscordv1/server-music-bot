@@ -147,7 +147,7 @@ function formatTime(ms) {
 }
 
 function loopLabel(mode) {
-  const modes = { none: "Off", track: "Track", queue: "Queue" };
+  const modes = { off: "Off", track: "Track", queue: "Queue" };
   return modes[mode] || "Off";
 }
 

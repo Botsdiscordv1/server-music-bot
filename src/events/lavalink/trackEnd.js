@@ -47,7 +47,7 @@ module.exports = {
 
       // Track set progress — refill when queue is empty and at least 1 track played
       player._djTracksInSet = (player._djTracksInSet || 0) + 1;
-      if (player.queue.tracks.length === 0) {
+      if (player.queue.tracks.length === 0 && !player._djRefilling) {
         player._djTracksInSet = 0;
         player._djSetNumber = (player._djSetNumber || 0) + 1;
 

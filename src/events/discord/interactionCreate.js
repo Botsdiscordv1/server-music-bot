@@ -122,6 +122,9 @@ async function handlePlaybackButton(interaction, client) {
       }
       case "playback_skip": {
         await interaction.deferUpdate();
+        const now = Date.now();
+        if (player._lastSkipTime && (now - player._lastSkipTime) < 1000) break;
+        player._lastSkipTime = now;
         if (player._djMode && player.queue.current) {
           const key = getTrackKey(player.queue.current);
           if (key) {
@@ -142,6 +145,9 @@ async function handlePlaybackButton(interaction, client) {
       }
       case "playback_dislike": {
         await interaction.deferUpdate();
+        const now = Date.now();
+        if (player._lastSkipTime && (now - player._lastSkipTime) < 1000) break;
+        player._lastSkipTime = now;
         if (player.queue.current) {
           const key = getTrackKey(player.queue.current);
           if (key) {
@@ -234,12 +240,7 @@ case "playback_lyrics": {
           }
           const added = await addLikedSong(interaction.user.id, track);
           if (!added) {
-            try {
-              await interaction.user.send({ embeds: [successEmbed(`**${track.info.title}** ya está en Tus Me Gusta`)] });
-              return interaction.reply({ content: "Revisa tus mensajes privados.", flags: MessageFlags.Ephemeral });
-            } catch (err) {
-              return interaction.reply({ embeds: [errorEmbed(`**${track.info.title}** ya está en Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
-            }
+            return interaction.reply({ embeds: [successEmbed(`**${track.info.title}** ya está en Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
           }
           if (player._djMode) {
             const key = getTrackKey(track);

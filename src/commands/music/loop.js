@@ -12,7 +12,7 @@ module.exports = {
         .setDescription("Modo de repetición")
         .setRequired(true)
         .addChoices(
-          { name: "Off", value: "none" },
+          { name: "Off", value: "off" },
           { name: "Track 🔂", value: "track" },
           { name: "Queue 🔁", value: "queue" }
         )
@@ -26,7 +26,7 @@ module.exports = {
     const mode = interaction.options.getString("mode");
     player.setRepeatMode(mode);
 
-    const labels = { none: "Loop **off**", track: "Looping current **track** 🔂", queue: "Looping **queue** 🔁" };
+    const labels = { off: "Loop **off**", track: "Looping current **track** 🔂", queue: "Looping **queue** 🔁" };
     await interaction.reply({ embeds: [successEmbed(labels[mode])] });
   },
 };
