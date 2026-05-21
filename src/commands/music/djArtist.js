@@ -105,6 +105,11 @@ async function refillArtistQueue(player, client) {
       `🎙️ Sumérgete en **${artistName}**. Arrancando con **${firstArtist}**…`,
       `🎙️ Todo **${artistName}** para ti. Empezamos con **${firstArtist}**.`,
       `🎙️ Nueva sesión de **${artistName}**, abriendo con **${firstArtist}**…`,
+      `🎙️ Especial **${artistName}** en tu reproductor. **${firstArtist}** suena primero.`,
+      `🎙️ **${artistName}** suena diferente hoy. **${firstArtist}** nos introduce al viaje.`,
+      `🎙️ Si te gusta **${artistName}**, esto te va a encantar. Arranca **${firstArtist}**.`,
+      `🎙️ De los favoritos de **${artistName}**, **${firstArtist}** abre la sesión.`,
+      `🎙️ **${artistName}** sin filtro. Primer track: **${firstArtist}**.`,
     ];
     const description = descTemplates[Math.floor(Math.random() * descTemplates.length)];
 

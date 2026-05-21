@@ -107,6 +107,7 @@ function generateSetDescription(profile, batch) {
   const genres = profile?.dominantGenres || [];
   const firstTrack = batch[0];
   const firstArtist = firstTrack?.info?.author || "";
+  const secondArtist = batch[1]?.info?.author || "";
 
   const bpmDesc = profile?.avgBpm
     ? (profile.avgBpm > 120 ? "ritmo rápido" : profile.avgBpm > 90 ? "ritmo medio" : "ritmo lento")
@@ -116,20 +117,37 @@ function generateSetDescription(profile, batch) {
     ? (profile.avgEnergy > 0.7 ? "alta energía" : profile.avgEnergy > 0.4 ? "energía media" : "ambiente relajado")
     : "";
 
+  const mood = profile?.avgEnergy != null
+    ? (profile.avgEnergy > 0.7 ? "🔥" : profile.avgEnergy > 0.4 ? "🎵" : "🌙")
+    : "🎵";
+
   const templates = [];
 
   if (genres.length) {
     templates.push(
-      `🎙️ Mezcla de ${genres.slice(0, 3).join(" y ")}, con ${bpmDesc || "buen ritmo"}. Arrancando con **${firstArtist}**…`,
-      `🎙️ La sesión de hoy trae ${genres.slice(0, 2).join(" y ") || "buena música"}, ${energyDesc}. **${firstArtist}** abre el set.`,
-      `🎙️ De vuelta con ${genres[0] || "música"}, ${bpmDesc}. Empezamos con **${firstArtist}**…`,
+      `${mood} Mezcla de ${genres.slice(0, 3).join(" y ")}, con ${bpmDesc || "buen ritmo"}. Arrancando con **${firstArtist}**…`,
+      `${mood} La sesión de hoy trae ${genres.slice(0, 2).join(" y ") || "buena música"}, ${energyDesc}. **${firstArtist}** abre el set.`,
+      `${mood} De vuelta con ${genres[0] || "música"}, ${bpmDesc}. Empezamos con **${firstArtist}**…`,
+      `${mood} ${genres.slice(0, 2).join(" y ")} del bueno. **${firstArtist}** nos prende desde el vamos.`,
+      `${mood} Taca taca taca — puro ${genres[0] || "sabor"} para tus oídos. Cortesía de **${firstArtist}**.`,
     );
   }
 
   templates.push(
-    `🎙️ Set listo para ti. **${firstArtist}** nos pone en ambiente…`,
-    `🎙️ Nueva tanda de canciones, arrancando con **${firstArtist}**.`,
+    `${mood} Set listo para ti. **${firstArtist}** nos pone en ambiente…`,
+    `${mood} Nueva tanda de canciones, arrancando con **${firstArtist}**.`,
+    `${mood} Suena **${firstArtist}** para empezar con todo este set.`,
+    `${mood} ¿Listo? **${firstArtist}** abre la sesión de hoy.`,
+    `${mood} Dale play y déjate llevar. **${firstArtist}** empieza el viaje.`,
+    `${mood} Sube el volumen que arranca **${firstArtist}**.`,
   );
+
+  if (secondArtist && secondArtist !== firstArtist) {
+    templates.push(
+      `${mood} De **${firstArtist}** a **${secondArtist}**, esto se pone bueno.`,
+      `${mood} **${firstArtist}** abre, **${secondArtist}** continúa. Buen set en camino.`,
+    );
+  }
 
   return templates[Math.floor(Math.random() * templates.length)];
 }
