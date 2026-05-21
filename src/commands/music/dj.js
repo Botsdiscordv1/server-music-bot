@@ -150,11 +150,12 @@ async function generateBatch(player, count = 10) {
 
 // Local TTS logic replaced by central ttsService.js
 
-function generateSetDescription(profile, batch) {
+function generateSetDescription(profile, batch, player) {
   const genres = profile?.dominantGenres || [];
   const firstTrack = batch[0];
   const firstArtist = firstTrack?.info?.author || "";
   const secondArtist = batch[1]?.info?.author || "";
+  const setNum = (player?._djSetNumber || 1);
 
   const bpmDesc = profile?.avgBpm
     ? (profile.avgBpm > 120 ? "ritmo rápido" : profile.avgBpm > 90 ? "ritmo medio" : "ritmo lento")
@@ -164,9 +165,24 @@ function generateSetDescription(profile, batch) {
     ? (profile.avgEnergy > 0.7 ? "alta energía" : profile.avgEnergy > 0.4 ? "energía media" : "ambiente relajado")
     : "";
 
-  const mood = profile?.avgEnergy != null
-    ? (profile.avgEnergy > 0.7 ? "🔥" : profile.avgEnergy > 0.4 ? "🎵" : "🌙")
-    : "🎵";
+  const emojis = ["🔥", "🎵", "🎶", "✨", "🎧", "⚡", "💿", "📀", "🎤", "🎸", "🎹", "🥁"];
+  const mood = emojis[Math.floor(Math.random() * emojis.length)];
+
+  // Track used templates per player to avoid repeats
+  if (!player?._djUsedTemplates) player._djUsedTemplates = [];
+  const used = new Set(player._djUsedTemplates);
+
+  const pick = (arr) => {
+    const pool = arr.filter(t => !used.has(t));
+    if (!pool.length) {
+      player._djUsedTemplates = [];
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    player._djUsedTemplates.push(picked);
+    if (player._djUsedTemplates.length > 10) player._djUsedTemplates.shift();
+    return picked;
+  };
 
   const templates = [];
   const epithet = ARTIST_EPITHETS[firstArtist.toLowerCase()];
@@ -176,6 +192,8 @@ function generateSetDescription(profile, batch) {
       `${mood} Sube el volumen que ya llegó ${epithet} a mejorar el ambiente.`,
       `${mood} Se abre el telón para ${epithet}. Disfruta del show.`,
       `${mood} Momento de altura: suena ${epithet}.`,
+      `${mood} Atención, ${epithet} está en la casa. Arrancamos.`,
+      `${mood} Nadie se mueva, ${epithet} acaba de entrar al estudio.`,
     );
   }
 
@@ -186,6 +204,7 @@ function generateSetDescription(profile, batch) {
       `${mood} De vuelta con ${genres[0] || "música"}, ${bpmDesc}. Empezamos con **${firstArtist}**…`,
       `${mood} ${genres.slice(0, 2).join(" y ")} del bueno. **${firstArtist}** nos prende desde el vamos.`,
       `${mood} Taca taca taca — puro ${genres[0] || "sabor"} para tus oídos. Cortesía de **${firstArtist}**.`,
+      `${mood} Esto suena a ${genres.slice(0, 2).join(" con ")}, cortesía de **${firstArtist}**.`,
     );
   }
 
@@ -196,16 +215,29 @@ function generateSetDescription(profile, batch) {
     `${mood} ¿Listo? **${firstArtist}** abre la sesión de hoy.`,
     `${mood} Dale play y déjate llevar. **${firstArtist}** empieza el viaje.`,
     `${mood} Sube el volumen que arranca **${firstArtist}**.`,
+    `${mood} Esto recién empieza. **${firstArtist}** pone la primera piedra.`,
+    `${mood} **${firstArtist}** al mando. Que suene.`,
+    `${mood} Play. **${firstArtist}** no necesita presentación.`,
+    `${mood} Arrancamos con todo. **${firstArtist}** al micrófono.`,
   );
 
   if (secondArtist && secondArtist !== firstArtist) {
     templates.push(
       `${mood} De **${firstArtist}** a **${secondArtist}**, esto se pone bueno.`,
       `${mood} **${firstArtist}** abre, **${secondArtist}** continúa. Buen set en camino.`,
+      `${mood} Dos artistas, un solo set. **${firstArtist}** → **${secondArtist}**.`,
     );
   }
 
-  return templates[Math.floor(Math.random() * templates.length)];
+  // Set number references for later sets
+  if (setNum > 2) {
+    templates.push(
+      `${mood} Set número ${setNum}. La fiesta no para. Arranca **${firstArtist}**.`,
+      `${mood} Vamos por el set ${setNum}. **${firstArtist}** abre la siguiente ronda.`,
+    );
+  }
+
+  return pick(templates);
 }
 
 async function refillQueue(player, client) {
@@ -225,7 +257,7 @@ async function refillQueue(player, client) {
 
     // Queue TTS intro then the batch
     const setNum = player._djSetNumber || 1;
-    const description = generateSetDescription(profile, batch);
+    const description = generateSetDescription(profile, batch, player);
     const ttsTrack = await queueTTS(player, description);
     if (ttsTrack) {
       player.queue.add(ttsTrack);
@@ -277,6 +309,7 @@ async function initDJ(player, userId, client) {
   player._djLikedSongs = [];
   player._djSetNumber = 1;
   player._djTracksInSet = 0;
+  player._djUsedTemplates = [];
   player._djSetSize = 10;
 
   await loadSeedsFromDB(player);

@@ -148,24 +148,52 @@ async function refillArtistQueue(player, client) {
     const setNum = player._djSetNumber || 1;
     const firstTrack = batch[0];
     const firstArtist = firstTrack?.info?.author || "";
+
+    const emojis = ["🔥", "🎵", "🎶", "✨", "🎧", "⚡", "💿", "📀", "🎤", "🎸", "🎹", "🥁"];
+    const mood = emojis[Math.floor(Math.random() * emojis.length)];
+
+    if (!player?._djUsedTemplates) player._djUsedTemplates = [];
+    const used = new Set(player._djUsedTemplates);
+
+    const pick = (arr) => {
+      const pool = arr.filter(t => !used.has(t));
+      if (!pool.length) {
+        player._djUsedTemplates = [];
+        return arr[Math.floor(Math.random() * arr.length)];
+      }
+      const picked = pool[Math.floor(Math.random() * pool.length)];
+      player._djUsedTemplates.push(picked);
+      if (player._djUsedTemplates.length > 10) player._djUsedTemplates.shift();
+      return picked;
+    };
+
     const descTemplates = [
-      `🎙️ Sumérgete en **${artistName}**. Arrancando con **${firstArtist}**…`,
-      `🎙️ Todo **${artistName}** para ti. Empezamos con **${firstArtist}**.`,
-      `🎙️ Nueva sesión de **${artistName}**, abriendo con **${firstArtist}**…`,
-      `🎙️ Especial **${artistName}** en tu reproductor. **${firstArtist}** suena primero.`,
-      `🎙️ **${artistName}** suena diferente hoy. **${firstArtist}** nos introduce al viaje.`,
-      `🎙️ Si te gusta **${artistName}**, esto te va a encantar. Arranca **${firstArtist}**.`,
-      `🎙️ De los favoritos de **${artistName}**, **${firstArtist}** abre la sesión.`,
-      `🎙️ **${artistName}** sin filtro. Primer track: **${firstArtist}**.`,
+      `${mood} Sumérgete en **${artistName}**. Arrancando con **${firstArtist}**…`,
+      `${mood} Todo **${artistName}** para ti. Empezamos con **${firstArtist}**.`,
+      `${mood} Nueva sesión de **${artistName}**, abriendo con **${firstArtist}**…`,
+      `${mood} Especial **${artistName}** en tu reproductor. **${firstArtist}** suena primero.`,
+      `${mood} **${artistName}** suena diferente hoy. **${firstArtist}** nos introduce al viaje.`,
+      `${mood} Si te gusta **${artistName}**, esto te va a encantar. Arranca **${firstArtist}**.`,
+      `${mood} De los favoritos de **${artistName}**, **${firstArtist}** abre la sesión.`,
+      `${mood} **${artistName}** sin filtro. Primer track: **${firstArtist}**.`,
+      `${mood} **${artistName}** en su máxima expresión. Arranca **${firstArtist}**.`,
+      `${mood} Lo mejor de **${artistName}**. **${firstArtist}** abre el set.`,
     ];
     const epithet = ARTIST_EPITHETS[artistName.toLowerCase()];
     if (epithet) {
       descTemplates.push(
-        `🎙️ Set dedicado a ${epithet}. Arrancando con **${firstArtist}**…`,
-        `🎙️ Momento de ${epithet}. Disfruta del set.`,
+        `${mood} Set dedicado a ${epithet}. Arrancando con **${firstArtist}**…`,
+        `${mood} Momento de ${epithet}. Disfruta del set.`,
+        `${mood} Esto es ${epithet}. **${firstArtist}** nos guía.`,
       );
     }
-    const description = descTemplates[Math.floor(Math.random() * descTemplates.length)];
+    if (setNum > 2) {
+      descTemplates.push(
+        `${mood} Set ${setNum} de **${artistName}**. Arranca **${firstArtist}**.`,
+        `${mood} Vamos con el set ${setNum}. **${artistName}** sigue sonando.`,
+      );
+    }
+    const description = pick(descTemplates);
 
     // Queue TTS intro then the batch
     const ttsTrack = await queueTTS(player, description);
@@ -222,6 +250,7 @@ async function initArtistDJ(player, userId, artistName, client) {
   player._djSetNumber = 1;
   player._djTracksInSet = 0;
   player._djSetSize = 10;
+  player._djUsedTemplates = [];
 
   await refillArtistQueue(player, client);
 }
