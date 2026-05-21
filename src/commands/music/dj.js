@@ -5,6 +5,54 @@ const { isExcluded, isVariant } = require("../../utils/trackFilter");
 const { generateSet } = require("../../services/djEngine");
 const { queueTTS } = require("../../utils/ttsService");
 
+const ARTIST_EPITHETS = {
+  "michael jackson": "el Rey del Pop",
+  "queen": "la reina del rock",
+  "bob marley": "el rey del reggae",
+  "elvis presley": "el Rey del Rock and Roll",
+  "madonna": "la Reina del Pop",
+  "beyoncé": "la Reina",
+  "tupac": "leyenda del rap",
+  "the beatles": "los fabulosos cuatro de Liverpool",
+  "david bowie": "el camaleón del rock",
+  "freddie mercury": "la voz más grande del rock",
+  "shakira": "la reina del pop latino",
+  "juan gabriel": "el Divo de Juárez",
+  "héctor lavoe": "el Cantante de los Cantantes",
+  "celia cruz": "la Reina de la Salsa",
+  "rubén blades": "el poeta de la salsa",
+  "marc anthony": "el rey de la salsa",
+  "daddy yankee": "el Big Boss del reggaetón",
+  "don omar": "el Rey del Reggaetón",
+  "wisin & yandel": "los reyes del reggaetón",
+  "ivy queen": "la Reina del Reggaetón",
+  "nicki minaj": "la Reina del Rap",
+  "eminem": "el mejor rapero de todos los tiempos",
+  "dr. dre": "el productor legendario del rap",
+  "snoop dogg": "el perro del rap callejero",
+  "jay-z": "el magnate del hip hop",
+  "kanye west": "el genio controvertido del hip hop",
+  "lil wayne": "el mejor rapero vivo",
+  "drake": "el rostro del hip hop moderno",
+  "j balvin": "el embajador del reggaetón",
+  "maluma": "el pretty boy del reggaetón",
+  "rosalía": "la revolución del flamenco pop",
+  "bad bunny": "el Conejo Malo, número uno del mundo",
+  "j. cole": "la conciencia del hip hop",
+  "bruno mars": "el showman por excelencia",
+  "prince": "el genio de Minneapolis",
+  "stevie wonder": "el genio de la música soul",
+  "aretha franklin": "la Reina del Soul",
+  "whitney houston": "la voz más poderosa del pop",
+  "amy winehouse": "el alma del soul moderno",
+  "nirvana": "los reyes del grunge",
+  "pink floyd": "los arquitectos del rock psicodélico",
+  "led zeppelin": "los dioses del rock clásico",
+  "ac/dc": "los dueños del rock and roll",
+  "metallica": "los titanes del metal",
+  "radiohead": "los innovadores del rock alternativo",
+};
+
 function getTrackKey(track) {
   let author = track.info?.author || track.track_author || track.author || "";
   author = author.replace(/\s*-\s*Topic$/i, "").trim();
@@ -121,6 +169,15 @@ function generateSetDescription(profile, batch) {
     : "🎵";
 
   const templates = [];
+  const epithet = ARTIST_EPITHETS[firstArtist.toLowerCase()];
+
+  if (epithet) {
+    templates.push(
+      `${mood} Sube el volumen que ya llegó ${epithet} a mejorar el ambiente.`,
+      `${mood} Se abre el telón para ${epithet}. Disfruta del show.`,
+      `${mood} Momento de altura: suena ${epithet}.`,
+    );
+  }
 
   if (genres.length) {
     templates.push(

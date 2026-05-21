@@ -21,6 +21,17 @@ const TTS_PRONUNCIATION = [
   [/\bTyler,\s*the\s+Creator\b/gi, "tyler the creator"],
   [/\bChildish\s+Gambino\b/gi, "childish gambino"],
   [/\bMgmt\b/gi, "em gee em tee"],
+  [/\bAnuel\s+AA\b/gi, "anuel doble a"],
+  [/\bArcángel\b/gi, "arkangel"],
+  [/\bBad\s+Bunny\b/gi, "bad bunny"],
+  [/\bRauw\s+Alejandro\b/gi, "rauw alejandro"],
+  [/\bFeid\b/gi, "feid"],
+  [/\bKarol\s+G\b/gi, "karol g"],
+  [/\bMyke\s+Towers\b/gi, "myke towers"],
+  [/\bMorad\b/gi, "morad"],
+  [/\bQuevedo\b/gi, "kevedo"],
+  [/\bSaiko\b/gi, "saiko"],
+  [/\bEl\s+adio\s+carajo\b/gi, "el adio carajo"],
 ];
 
 /**
