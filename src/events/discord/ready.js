@@ -58,5 +58,12 @@ module.exports = {
         }
       }
     }, 30000);
+
+    function clearIntervals() {
+      clearInterval(client._pingInterval);
+      clearInterval(client._healthInterval);
+    }
+    client.once("destroy", clearIntervals);
+    client.on("error", () => clearIntervals());
   },
 };

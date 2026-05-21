@@ -3,7 +3,7 @@ const { requirePlayer } = require("../../utils/checks");
 const { getLyrics, getCurrentLine } = require("../../services/lrclib");
 const { errorEmbed } = require("../../utils/embeds");
 
-const UPDATE_INTERVAL = 0.01;
+const UPDATE_INTERVAL = 0.5;
 const LRC_OFFSET = 0.05;
 const MAX_DURATION = 10 * 60 * 1000;
 

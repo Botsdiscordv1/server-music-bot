@@ -4,6 +4,15 @@ const { getLikedSongs, getDislikedKeys } = require("../../database");
 const { generateArtistSet } = require("../../services/djEngine");
 const { queueTTS } = require("../../utils/ttsService");
 
+const MAX_PLAYED_SET = 1000;
+
+function trimPlayedSet(set, max = MAX_PLAYED_SET) {
+  if (set.size > max) {
+    const toDelete = [...set].slice(0, set.size - max);
+    toDelete.forEach(v => set.delete(v));
+  }
+}
+
 const ARTIST_EPITHETS = {
   "michael jackson": "el Rey del Pop",
   "queen": "la reina del rock",
@@ -113,6 +122,8 @@ async function generateBatch(player, artistName, count = 10) {
     }
   }
 
+  trimPlayedSet(playedIds);
+  trimPlayedSet(playedTitles);
   player._djPlayedIds = playedIds;
   player._djPlayedTitles = playedTitles;
   return { batch, profile: lastResult?.profile || null };
@@ -178,16 +189,21 @@ async function refillArtistQueue(player, client) {
     const setRef = setNum > 2 ? `. Set número ${setNum}` : "";
 
     const descTemplates = [
-      `${mood} Sumérgete en **${artistName}**, ${epithetLine}con lo mejor de su repertorio. Arrancando con **${firstArtist}**${setRef}.`,
-      `${mood} Todo **${artistName}** para ti, ${epithetLine}en una sesión especial. Empezamos con **${firstArtist}**${setRef}.`,
-      `${mood} Nueva sesión de **${artistName}**, ${epithetLine}abriendo con **${firstArtist}** para disfrutar de sus mejores temas${setRef}.`,
-      `${mood} Especial **${artistName}**${epithetLine}en tu reproductor. **${firstArtist}** suena primero${setRef}.`,
-      `${mood} **${artistName}** suena diferente hoy, ${epithetLine}con **${firstArtist}** guiándonos en este viaje musical${setRef}.`,
-      `${mood} Si te gusta **${artistName}**, ${epithetLine}esto te va a encantar. Arranca **${firstArtist}**${setRef}.`,
-      `${mood} De los favoritos de **${artistName}**, ${epithetLine}**${firstArtist}** abre la sesión con toda la energía${setRef}.`,
-      `${mood} **${artistName}** sin filtro, ${epithetLine}en su máxima expresión. Primer track: **${firstArtist}**${setRef}.`,
-      `${mood} **${artistName}** en su máxima expresión, ${epithetLine}arranca **${firstArtist}** con un set imperdible${setRef}.`,
-      `${mood} Lo mejor de **${artistName}**, ${epithetLine}con **${firstArtist}** abriendo el set para ti${setRef}.`,
+      `💿 Damos inicio al set #${setNum} con **${firstArtist}** trayendo una transición impecable a la cabina.`,
+      `${mood} La música fluye en el set #${setNum} con **${firstArtist}** liderando los primeros minutos de la mezcla.`,
+      `${mood} El set #${setNum} comienza a tomar forma con **${firstArtist}** definiendo la vibra de esta sesión.`,
+      `${mood} Subimos la energía en el set #${setNum} con la apertura a cargo de **${firstArtist}**.`,
+      `${mood} **${firstArtist}** toma los controles del set #${setNum} con un ritmo que marca el pulso ideal.`,
+      `${mood} Sonidos frescos para arrancar el set #${setNum} con **${firstArtist}** al mando de la mezcla.`,
+      `${mood} Despegamos en el set #${setNum} de la mano de **${firstArtist}** y una vibra inigualable.`,
+      `${mood} La cabina del set #${setNum} se enciende con la entrada directa de **${firstArtist}**.`,
+      `${mood} **${firstArtist}** nos sumerge en el set #${setNum} con una atmósfera perfecta para empezar.`,
+      `${mood} Arrancamos la transmisión del set #${setNum} con **${firstArtist}** guiando los beats iniciales.`,
+      `${mood} Una verdadera leyenda inaugura el set #${setNum} con **${firstArtist}** liderando la transición inicial.`,
+      `${mood} El set #${setNum} recibe un sonido histórico con **${firstArtist}** al frente de esta apertura.`,
+      `${mood} La voz que marcó una era abre el set #${setNum} con **${firstArtist}** en la mezcla inicial.`,
+      `${mood} El legado musical se siente en el set #${setNum} con **${firstArtist}** abriendo la pista.`,
+      `${mood} El set #${setNum} sube su nivel con **${firstArtist}** y un sonido imposible de olvidar.`,
     ];
     const description = pick(descTemplates);
 

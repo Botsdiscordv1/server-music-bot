@@ -5,6 +5,8 @@ const { isExcluded, isVariant } = require("../../utils/trackFilter");
 const { generateSet } = require("../../services/djEngine");
 const { queueTTS } = require("../../utils/ttsService");
 
+const MAX_PLAYED_SET = 1000;
+
 const ARTIST_EPITHETS = {
   "michael jackson": "el Rey del Pop",
   "queen": "la reina del rock",
@@ -52,6 +54,13 @@ const ARTIST_EPITHETS = {
   "metallica": "los titanes del metal",
   "radiohead": "los innovadores del rock alternativo",
 };
+
+function trimPlayedSet(set, max = MAX_PLAYED_SET) {
+  if (set.size > max) {
+    const toDelete = [...set].slice(0, set.size - max);
+    toDelete.forEach(v => set.delete(v));
+  }
+}
 
 function getTrackKey(track) {
   let author = track.info?.author || track.track_author || track.author || "";
@@ -148,6 +157,8 @@ async function generateBatch(player, count = 10) {
     }
   }
 
+  trimPlayedSet(playedIds);
+  trimPlayedSet(playedTitles);
   player._djPlayedIds = playedIds;
   player._djPlayedTitles = playedTitles;
   return { batch, profile: lastResult?.profile || null };
@@ -201,44 +212,31 @@ function generateSetDescription(profile, batch, player) {
 
   const env = { mood, firstArtist, secondArtist, genreStr, bpmDesc, energyLine, epithetLine, setRef };
 
-  const templates = [];
+  const templates = [
+    `💿 Damos inicio al set #${setNum} con **${firstArtist}** trayendo una transición impecable a la cabina.`,
+    `${mood} La música fluye en el set #${setNum} con **${firstArtist}** liderando los primeros minutos de la mezcla.`,
+    `${mood} El set #${setNum} comienza a tomar forma con **${firstArtist}** definiendo la vibra de esta sesión.`,
+    `${mood} Subimos la energía en el set #${setNum} con la apertura a cargo de **${firstArtist}**.`,
+    `${mood} **${firstArtist}** toma los controles del set #${setNum} con un ritmo que marca el pulso ideal.`,
+    `${mood} Sonidos frescos para arrancar el set #${setNum} con **${firstArtist}** al mando de la mezcla.`,
+    `${mood} Despegamos en el set #${setNum} de la mano de **${firstArtist}** y una vibra inigualable.`,
+    `${mood} La cabina del set #${setNum} se enciende con la entrada directa de **${firstArtist}**.`,
+    `${mood} **${firstArtist}** nos sumerge en el set #${setNum} con una atmósfera perfecta para empezar.`,
+    `${mood} Arrancamos la transmisión del set #${setNum} con **${firstArtist}** guiando los beats iniciales.`,
+    `${mood} Una verdadera leyenda inaugura el set #${setNum} con **${firstArtist}** liderando la transición inicial.`,
+    `${mood} El set #${setNum} recibe un sonido histórico con **${firstArtist}** al frente de esta apertura.`,
+    `${mood} La voz que marcó una era abre el set #${setNum} con **${firstArtist}** en la mezcla inicial.`,
+    `${mood} El legado musical se siente en el set #${setNum} con **${firstArtist}** abriendo la pista.`,
+    `${mood} El set #${setNum} sube su nivel con **${firstArtist}** y un sonido imposible de olvidar.`,
+  ];
 
-  // ── Epithet-based ─────────────────────────────────────────────────
-  templates.push(
-    `${mood} Sube el volumen que ya llegó ${epithetLine}para poner ${genreStr} con ${bpmDesc}${energyLine}. Arranca **${firstArtist}**.`,
-    `${mood} Se abre el telón para ${epithetLine}en un set de ${genreStr}, ${bpmDesc}${energyLine}. **${firstArtist}** al mando.`,
-    `${mood} Atención, ${epithetLine}está en la casa. Mezcla de ${genreStr} con ${bpmDesc}${energyLine}. Suena **${firstArtist}**.`,
-    `${mood} Nadie se mueva, ${epithetLine}acaba de llegar con ${genreStr}, ${bpmDesc}${energyLine}. Disfruta de **${firstArtist}**.`,
-  );
-
-  // ── Genre-based ───────────────────────────────────────────────────
-  templates.push(
-    `${mood} Mezcla de ${genreStr}, ${bpmDesc}${energyLine}. Arrancando con **${firstArtist}** para este nuevo set.`,
-    `${mood} La sesión de hoy trae ${genreStr}, ${bpmDesc}${energyLine}. **${firstArtist}** abre el set con todo.`,
-    `${mood} De vuelta con ${genreStr}, ${bpmDesc}${energyLine}. Empezamos con **${firstArtist}**…`,
-    `${mood} Puro ${genreStr} del bueno, ${bpmDesc}${energyLine}. **${firstArtist}** nos prende desde el vamos.`,
-    `${mood} Esto suena a ${genreStr}, ${bpmDesc}${energyLine}. Cortesía de **${firstArtist}**.`,
-    `${mood} Taca taca taca — puro ${genreStr}, ${bpmDesc}${energyLine}. Llega **${firstArtist}**.`,
-  );
-
-  // ── Generic ───────────────────────────────────────────────────────
-  templates.push(
-    `${mood} Set listo con ${genreStr}, ${bpmDesc}${energyLine}. **${firstArtist}** nos pone en ambiente.`,
-    `${mood} Nueva tanda de canciones: ${genreStr}, ${bpmDesc}${energyLine}. Arranca **${firstArtist}**.`,
-    `${mood} Suena **${firstArtist}** para empezar con todo. ${genreStr}, ${bpmDesc}${energyLine}.`,
-    `${mood} Dale play y déjate llevar. **${firstArtist}** empieza el viaje con ${genreStr}, ${bpmDesc}${energyLine}.`,
-    `${mood} Esto recién empieza. **${firstArtist}** pone la primera piedra con ${genreStr}, ${bpmDesc}${energyLine}.`,
-    `${mood} Arrancamos con todo. **${firstArtist}** al micrófono con ${genreStr}, ${bpmDesc}${energyLine}.`,
-    `${mood} ¿Listo? **${firstArtist}** abre la sesión de hoy con ${genreStr}, ${bpmDesc}${energyLine}.`,
-    `${mood} Play. **${firstArtist}** no necesita presentación. ${genreStr}, ${bpmDesc}${energyLine}.`,
-  );
-
-  // ── Second artist ────────────────────────────────────────────────
-  if (secondArtist && secondArtist !== firstArtist) {
+  if (epithetLine) {
     templates.push(
-      `${mood} De **${firstArtist}** a **${secondArtist}**, esto se pone bueno. ${genreStr}, ${bpmDesc}${energyLine}.`,
-      `${mood} **${firstArtist}** abre, **${secondArtist}** continúa. ${genreStr}, ${bpmDesc}${energyLine}. Buen set en camino.`,
-      `${mood} Dos artistas, un solo set. **${firstArtist}** → **${secondArtist}**. ${genreStr}, ${bpmDesc}${energyLine}.`,
+      `${mood} Set #${setNum}. **${firstArtist}** llega sin anunciarse y el set cobra vida por sí solo.`,
+      `${mood} **${firstArtist}** toma la cabina en el set #${setNum} con la autoridad de quien sabe lo que trae.`,
+      `${mood} Set #${setNum}. Cuando **${firstArtist}** abre la sesión, todo lo demás queda en segundo plano.`,
+      `${mood} **${firstArtist}** al frente del set #${setNum}. Arranca con la seguridad de un clásico viviente.`,
+      `${mood} Set #${setNum}. **${firstArtist}** pone el primer track y el resto del set se alinea solo.`,
     );
   }
 

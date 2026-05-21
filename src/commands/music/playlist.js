@@ -58,18 +58,26 @@ module.exports = [
 
       const { filterAndSort } = require("../../utils/trackFilter");
       const tracks = JSON.parse(playlist.tracks);
-      for (const t of tracks) {
-        const result = await player.search({ query: `${t.title} ${t.author}`, source: "ytmsearch" }, interaction.user);
-        if (result?.tracks?.length > 0) {
-          const sorted = filterAndSort(result.tracks);
-          const bestTrack = sorted.length > 0 ? sorted[0] : result.tracks[0];
-          if (player._shuffleEnabled) {
-            const pos = Math.floor(Math.random() * (player.queue.tracks.length + 1));
-            await player.queue.add(bestTrack, pos);
-            if (!player._naturalQueue) player._naturalQueue = [];
-            player._naturalQueue.push(bestTrack);
-          } else {
-            player.queue.add(bestTrack);
+      const CONCURRENCY = 5;
+      for (let i = 0; i < tracks.length; i += CONCURRENCY) {
+        const chunk = tracks.slice(i, i + CONCURRENCY);
+        const results = await Promise.allSettled(chunk.map(t =>
+          player.search({ query: `${t.title} ${t.author}`, source: "ytmsearch" }, interaction.user)
+        ));
+        for (let j = 0; j < results.length; j++) {
+          const t = chunk[j];
+          const res = results[j];
+          if (res.status === "fulfilled" && res.value?.tracks?.length > 0) {
+            const sorted = filterAndSort(res.value.tracks);
+            const bestTrack = sorted.length > 0 ? sorted[0] : res.value.tracks[0];
+            if (player._shuffleEnabled) {
+              const pos = Math.floor(Math.random() * (player.queue.tracks.length + 1));
+              await player.queue.add(bestTrack, pos);
+              if (!player._naturalQueue) player._naturalQueue = [];
+              player._naturalQueue.push(bestTrack);
+            } else {
+              player.queue.add(bestTrack);
+            }
           }
         }
       }

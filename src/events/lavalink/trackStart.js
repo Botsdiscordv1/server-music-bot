@@ -1,7 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const { nowPlayingEmbed } = require("../../utils/embeds");
 const { getLyrics } = require("../../services/lrclib");
-const { updateUserStats, addToHistory, incrementTrackPlay, getLikedSongs, isSongInLikes } = require("../../database");
+const { updateUserStats, addToHistory, incrementTrackPlay, isSongLiked } = require("../../database");
 
 
 module.exports = {
@@ -50,20 +50,16 @@ module.exports = {
         .setEmoji("<:random:1504767140228632607>")
         .setStyle(player._shuffleEnabled ? ButtonStyle.Success : ButtonStyle.Secondary);
 
-      // Load liked URLs for current requester (reload if requester changed)
       const targetUserId = (track.requester?.id && track.requester.id !== "dj")
         ? track.requester.id
         : player.requesterId;
 
-      if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedSongs)) {
+      let trackLiked = false;
+      if (targetUserId) {
         try {
-          const liked = await getLikedSongs(targetUserId);
-          player._djLikedSongs = liked;
-          player._djLikedUrls = new Set(liked.map(s => s.track_url).filter(Boolean));
-          player._djLikedOwner = targetUserId;
+          trackLiked = await isSongLiked(targetUserId, track);
         } catch {}
       }
-      const trackLiked = isSongInLikes(player._djLikedSongs || [], track);
 
       // ── Row 1 setup ───────────────────────────────────────────────────────
       const rowComp = [backBtn, pauseBtn, skipBtn, stopBtn];

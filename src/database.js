@@ -16,6 +16,7 @@ const userStatsSchema = new mongoose.Schema({
   favoriteArtist: String,
   lastPlayed: Date,
 }, { timestamps: true });
+userStatsSchema.index({ totalListenTime: -1 });
 
 const playlistSchema = new mongoose.Schema({
   guildId: { type: String, required: true },
@@ -43,6 +44,9 @@ const likedSongSchema = new mongoose.Schema({
   isrc: String,
   likedAt: { type: Date, default: Date.now },
 });
+likedSongSchema.index({ userId: 1, trackUrl: 1 });
+likedSongSchema.index({ userId: 1, isrc: 1 });
+likedSongSchema.index({ userId: 1, trackAuthor: 1 });
 
 const trackPlaySchema = new mongoose.Schema({
   userId: { type: String, required: true },
@@ -268,9 +272,11 @@ async function removeAllLikedSongs(userId) {
   return result.deletedCount;
 }
 
-async function getLikedSongs(userId) {
+async function getLikedSongs(userId, limit = 0) {
   await whenReady(() => {});
-  const docs = await LikedSong.find({ userId }).sort({ likedAt: -1 }).lean();
+  let query = LikedSong.find({ userId }).sort({ likedAt: -1 });
+  if (limit > 0) query = query.limit(limit);
+  const docs = await query.lean();
   return docs.map(doc => ({
     id: doc._id.toString(),
     user_id: doc.userId,
@@ -282,6 +288,32 @@ async function getLikedSongs(userId) {
     isrc: doc.isrc,
     liked_at: doc.likedAt,
   }));
+}
+
+async function isSongLiked(userId, track) {
+  await whenReady(() => {});
+  if (!track?.info) return false;
+  const url = track.info.uri;
+  if (url) {
+    const found = await LikedSong.findOne({ userId, trackUrl: url }).lean();
+    if (found) return true;
+  }
+  const isrc = extractIsrc(track);
+  if (isrc) {
+    const found = await LikedSong.findOne({ userId, isrc }).lean();
+    if (found) return true;
+  }
+  const title = (track.info.title || "").toLowerCase();
+  const author = cleanAuthor(track.info.author || "").toLowerCase().trim();
+  if (title && author) {
+    const found = await LikedSong.findOne({
+      userId,
+      trackTitle: { $regex: `^${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+      trackAuthor: { $regex: `^${author.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+    }).lean();
+    if (found) return true;
+  }
+  return false;
 }
 
 function isSongInLikes(likedSongs, track) {
@@ -355,26 +387,24 @@ async function copyLikedSongs(fromUserId, toUserId) {
   const sourceSongs = await LikedSong.find({ userId: fromUserId }).lean();
   if (sourceSongs.length === 0) return { copied: 0, skipped: 0, total: 0 };
 
-  let copied = 0;
-  let skipped = 0;
-  for (const song of sourceSongs) {
-    const exists = await LikedSong.findOne({ userId: toUserId, trackUrl: song.trackUrl });
-    if (!exists) {
-      await LikedSong.create({
-        userId: toUserId,
-        trackTitle: song.trackTitle,
-        trackAuthor: song.trackAuthor,
-        trackUrl: song.trackUrl,
-        trackDuration: song.trackDuration,
-        artworkUrl: song.artworkUrl,
-        isrc: song.isrc,
-      });
-      copied++;
-    } else {
-      skipped++;
-    }
+  const existing = await LikedSong.find({ userId: toUserId }).lean();
+  const existingUrls = new Set(existing.map(s => s.trackUrl).filter(Boolean));
+
+  const toInsert = sourceSongs.filter(song => !existingUrls.has(song.trackUrl));
+  if (toInsert.length > 0) {
+    const docs = toInsert.map(song => ({
+      userId: toUserId,
+      trackTitle: song.trackTitle,
+      trackAuthor: song.trackAuthor,
+      trackUrl: song.trackUrl,
+      trackDuration: song.trackDuration,
+      artworkUrl: song.artworkUrl,
+      isrc: song.isrc,
+    }));
+    await LikedSong.insertMany(docs, { ordered: false });
   }
-  return { copied, skipped, total: sourceSongs.length };
+
+  return { copied: toInsert.length, skipped: sourceSongs.length - toInsert.length, total: sourceSongs.length };
 }
 
 async function copyPlaylist(guildId, fromUserId, toUserId, playlistName) {
@@ -460,6 +490,7 @@ module.exports = {
   removeLikedSongByTrack,
   removeAllLikedSongs,
   getLikedSongs,
+  isSongLiked,
   isSongInLikes,
   extractIsrc,
   getLikedArtists,

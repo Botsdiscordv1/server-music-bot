@@ -78,7 +78,8 @@ module.exports = {
       const searchTerms = focused.split(" ").filter(t => t.length > 1);
       const matched = [];
       
-      for (let i = 0; i < queue.length; i++) {
+      const MAX_RESULTS = 25;
+      for (let i = 0; i < queue.length && matched.length < MAX_RESULTS * 2; i++) {
         const track = queue[i];
         const titleLower = track.info.title.toLowerCase();
         const authorLower = track.info.author.toLowerCase();

@@ -1,5 +1,8 @@
 const axios = require("axios");
 
+const api = axios.create({ timeout: 10000 });
+const accountsApi = axios.create({ timeout: 10000 });
+
 let accessToken = null;
 let tokenExpiry = 0;
 
@@ -14,7 +17,7 @@ async function getAccessToken() {
     `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
   ).toString("base64");
 
-  const res = await axios.post(
+  const res = await accountsApi.post(
     "https://accounts.spotify.com/api/token",
     "grant_type=client_credentials",
     {
@@ -38,7 +41,7 @@ async function getAccessToken() {
  */
 async function searchTracks(query, limit = 5) {
   const token = await getAccessToken();
-  const res = await axios.get("https://api.spotify.com/v1/search", {
+  const res = await api.get("https://api.spotify.com/v1/search", {
     headers: { Authorization: `Bearer ${token}` },
     params: { q: query, type: "track", limit },
   });
@@ -53,7 +56,7 @@ async function searchTracks(query, limit = 5) {
 async function getTrack(trackId) {
   const token = await getAccessToken();
   const id = trackId.replace("spotify:track:", "");
-  const res = await axios.get(`https://api.spotify.com/v1/tracks/${id}`, {
+  const res = await api.get(`https://api.spotify.com/v1/tracks/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   return formatTrack(res.data);
@@ -71,7 +74,7 @@ async function getPlaylist(playlistId) {
   let url = `https://api.spotify.com/v1/playlists/${id}/tracks?limit=100`;
 
   while (url) {
-    const res = await axios.get(url, {
+    const res = await api.get(url, {
       headers: { Authorization: `Bearer ${token}` },
     });
     tracks = tracks.concat(
@@ -96,7 +99,7 @@ async function getRecommendations(seedTrackIds = [], seedArtistIds = [], seedGen
   if (seedTrackIds.length > 0) params.seed_tracks = seedTrackIds.slice(0, 5).join(",");
   if (seedArtistIds.length > 0) params.seed_artists = seedArtistIds.slice(0, 2).join(",");
   if (seedGenres.length > 0) params.seed_genres = seedGenres.slice(0, 2).join(",");
-  const res = await axios.get("https://api.spotify.com/v1/recommendations", {
+  const res = await api.get("https://api.spotify.com/v1/recommendations", {
     headers: { Authorization: `Bearer ${token}` },
     params,
   });
@@ -112,7 +115,7 @@ async function getAudioFeatures(trackIds) {
   if (!trackIds.length) return [];
   const token = await getAccessToken();
   const ids = trackIds.map(id => id.replace("spotify:track:", "")).join(",");
-  const res = await axios.get("https://api.spotify.com/v1/audio-features", {
+  const res = await api.get("https://api.spotify.com/v1/audio-features", {
     headers: { Authorization: `Bearer ${token}` },
     params: { ids },
   });
@@ -128,7 +131,7 @@ async function getSeveralTracks(trackIds) {
   if (!trackIds.length) return [];
   const token = await getAccessToken();
   const ids = trackIds.map(id => id.replace("spotify:track:", "")).join(",");
-  const res = await axios.get("https://api.spotify.com/v1/tracks", {
+  const res = await api.get("https://api.spotify.com/v1/tracks", {
     headers: { Authorization: `Bearer ${token}` },
     params: { ids },
   });
@@ -144,7 +147,7 @@ async function getArtists(artistIds) {
   if (!artistIds.length) return [];
   const token = await getAccessToken();
   const ids = artistIds.join(",");
-  const res = await axios.get("https://api.spotify.com/v1/artists", {
+  const res = await api.get("https://api.spotify.com/v1/artists", {
     headers: { Authorization: `Bearer ${token}` },
     params: { ids },
   });
@@ -158,7 +161,7 @@ async function getArtists(artistIds) {
  */
 async function getArtistTopTracks(artistId) {
   const token = await getAccessToken();
-  const res = await axios.get(
+  const res = await api.get(
     `https://api.spotify.com/v1/artists/${artistId}/top-tracks`,
     {
       headers: { Authorization: `Bearer ${token}` },
@@ -202,7 +205,7 @@ function formatTrack(track) {
  * @returns {{ title: string, artist: string, thumbnail: string }}
  */
 async function getTrackOembed(url) {
-  const res = await axios.get("https://open.spotify.com/oembed", {
+  const res = await api.get("https://open.spotify.com/oembed", {
     params: { url },
   });
 

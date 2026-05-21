@@ -9,7 +9,13 @@ module.exports = {
   async execute(player, track, payload, client) {
     const exc = payload?.exception;
     const errorMsg = exc?.message || payload?.error?.message || payload?.message || payload?.error || JSON.stringify(payload).substring(0, 500);
-    
+
+    // Solo buscar fallback si este track sigue siendo el actual
+    const isCurrentTrack = player?.queue?.current?.info?.uri === track?.info?.uri;
+    if (!isCurrentTrack) {
+      return;
+    }
+
     const isRestricted = errorMsg.includes("This video is not available") || errorMsg.includes("ANDROID_VR");
 
     if (isRestricted && track?.info?.title) {
@@ -36,11 +42,11 @@ module.exports = {
             ? tracksToUse.find(t => !t.info.uri?.includes(videoId)) || tracksToUse[0]
             : tracksToUse[0];
           player.queue.add(altTrack, 0);
-          const isStillOnErrored = player.queue.current?.info?.uri === track?.info?.uri;
-          if (isStillOnErrored) {
-            await player.skip().catch(e => console.error(`[TrackError] skip() failed:`, e.message));
+          const stillCurrent = player.queue.current?.info?.uri === track?.info?.uri;
+          if (stillCurrent) {
+            await player.skip().catch(() => {});
           } else if (!player.playing && !player.paused) {
-            await player.play({ paused: false }).catch(e => console.error(`[TrackError] play() failed:`, e.message));
+            await player.play({ paused: false }).catch(() => {});
           }
           return;
         }

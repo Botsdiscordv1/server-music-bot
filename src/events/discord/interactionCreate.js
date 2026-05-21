@@ -3,7 +3,7 @@ const { errorEmbed, successEmbed, queueEmbed, lyricsEmbed } = require("../../uti
 const { getLyrics, formatLyricsForEmbed } = require("../../services/lrclib");
 const { startKaraoke } = require("../../commands/music/karaoke");
 const searchCommand = require("../../commands/music/search");
-const { addLikedSong, removeLikedSongByTrack, isSongInLikes, addDislikedSong } = require("../../database");
+const { addLikedSong, removeLikedSongByTrack, isSongInLikes, isSongLiked, addDislikedSong } = require("../../database");
 const { getTrackKey } = require("../../commands/music/dj");
 const { getAutoplayTrack } = require("../../services/autoplay");
 
@@ -40,11 +40,9 @@ module.exports = {
         const reply = { embeds: [errorEmbed("An error occurred while running this command.")], flags: 64 };
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp(reply).catch(() => {});
-          } else {
-            const channel = client.channels.cache.get(player.textChannelId);
-            if (channel) channel.send({ content: "🎧 Armando nuevo set… se reproducirá automáticamente cuando esté listo." }).catch(() => {});
-            await player.skip().catch(() => {});
-          }
+        } else {
+          await interaction.reply(reply).catch(() => {});
+        }
       }
       return;
     }
@@ -89,11 +87,29 @@ async function handlePlaybackButton(interaction, client) {
   }
 
   const memberChannel = interaction.member?.voice?.channelId;
-  if (!memberChannel || memberChannel !== player.voiceChannelId) {
+  if (!memberChannel) {
+    return interaction.reply({
+      embeds: [errorEmbed("You must be in a voice channel.")],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  if (memberChannel !== player.voiceChannelId) {
     return interaction.reply({
       embeds: [errorEmbed("You must be in the same voice channel as the bot.")],
       flags: MessageFlags.Ephemeral,
     });
+  }
+
+  if (!player.connected) {
+    try {
+      player.voiceChannelId = memberChannel;
+      await player.connect();
+    } catch {
+      return interaction.reply({
+        embeds: [errorEmbed("Could not reconnect to voice.")],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
   }
 
   try {
@@ -126,7 +142,10 @@ async function handlePlaybackButton(interaction, client) {
         await interaction.deferUpdate();
         const now = Date.now();
         if (player._lastSkipTime && (now - player._lastSkipTime) < 1000) break;
+        if (player._skipLock) break;
         player._lastSkipTime = now;
+        player._skipLock = true;
+        setTimeout(() => { player._skipLock = false; }, 1500);
         if (player._djMode && player.queue.current) {
           const key = getTrackKey(player.queue.current);
           if (key) {
@@ -157,7 +176,10 @@ async function handlePlaybackButton(interaction, client) {
         await interaction.deferUpdate();
         const now = Date.now();
         if (player._lastSkipTime && (now - player._lastSkipTime) < 1000) break;
+        if (player._skipLock) break;
         player._lastSkipTime = now;
+        player._skipLock = true;
+        setTimeout(() => { player._skipLock = false; }, 1500);
         if (player.queue.current) {
           const key = getTrackKey(player.queue.current);
           if (key) {
@@ -257,11 +279,10 @@ case "playback_lyrics": {
             return interaction.reply({ embeds: [errorEmbed("No hay ninguna canción reproduciéndose.")], flags: MessageFlags.Ephemeral });
           }
 
-          // Try to add — returns false if already exists for this user
-          const added = await addLikedSong(interaction.user.id, track);
+          const alreadyLiked = await isSongLiked(interaction.user.id, track);
 
-          if (added) {
-            // Was NOT in clicking user's likes → now added
+          if (!alreadyLiked) {
+            await addLikedSong(interaction.user.id, track);
             if (player._djMode) {
               const key = getTrackKey(track);
               if (key && !(player._djPositiveSeeds || []).some(s => s.key === key)) {
@@ -270,24 +291,10 @@ case "playback_lyrics": {
                 player._djPositiveSeeds = [...(player._djPositiveSeeds || []), { key, title, author }].slice(-10);
               }
             }
-
-            // Refresh cache so buttons reflect this user's state
-            const { getLikedSongs } = require("../../database");
-            player._djLikedSongs = await getLikedSongs(interaction.user.id);
-            player._djLikedUrls = new Set(player._djLikedSongs.map(s => s.track_url).filter(Boolean));
-            player._djLikedOwner = interaction.user.id;
-
             await interaction.reply({ embeds: [successEmbed(`❤️ **${track.info.title}** añadida a Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
           } else {
-            // Already in clicking user's likes → remove it
             const removed = await removeLikedSongByTrack(interaction.user.id, track);
             if (removed) {
-              // Refresh cache so buttons reflect removal
-              const { getLikedSongs } = require("../../database");
-              player._djLikedSongs = await getLikedSongs(interaction.user.id);
-              player._djLikedUrls = new Set(player._djLikedSongs.map(s => s.track_url).filter(Boolean));
-              player._djLikedOwner = interaction.user.id;
-
               await interaction.reply({ embeds: [successEmbed(`💔 **${track.info.title}** eliminada de Tus Me Gusta`)], flags: MessageFlags.Ephemeral });
             } else {
               await interaction.reply({ embeds: [errorEmbed(`No se pudo eliminar **${track.info.title}** de Tus Me Gusta.`)], flags: MessageFlags.Ephemeral });
@@ -334,16 +341,12 @@ async function updateNowPlayingButtons(player, client) {
     ? track.requester.id
     : player.requesterId;
 
-  if (targetUserId && (player._djLikedOwner !== targetUserId || !player._djLikedSongs)) {
+  let trackLiked = false;
+  if (targetUserId) {
     try {
-      const { getLikedSongs } = require("../../database");
-      const liked = await getLikedSongs(targetUserId);
-      player._djLikedSongs = liked;
-      player._djLikedUrls = new Set(liked.map(s => s.track_url).filter(Boolean));
-      player._djLikedOwner = targetUserId;
+      trackLiked = await isSongLiked(targetUserId, track);
     } catch {}
   }
-  const trackLiked = isSongInLikes(player._djLikedSongs || [], track);
 
   const randomBtn = new ButtonBuilder()
     .setCustomId("playback_random")

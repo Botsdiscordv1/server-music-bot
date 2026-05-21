@@ -11,7 +11,14 @@ const processedAutocomplete = new Set();
 setInterval(() => processedAutocomplete.clear(), 60_000);
 
 const autocompleteArtworkCache = new Map();
-setInterval(() => autocompleteArtworkCache.clear(), 3600_000);
+const ARTWORK_CACHE_MAX = 500;
+setInterval(() => {
+  if (autocompleteArtworkCache.size > ARTWORK_CACHE_MAX) {
+    const keys = [...autocompleteArtworkCache.keys()].slice(0, autocompleteArtworkCache.size - ARTWORK_CACHE_MAX);
+    keys.forEach(k => autocompleteArtworkCache.delete(k));
+  }
+}, 60_000);
+setTimeout(() => autocompleteArtworkCache.clear(), 3600_000);
 
 module.exports = {
   data: new SlashCommandBuilder()
