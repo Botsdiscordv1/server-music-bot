@@ -1,4 +1,4 @@
-const { pickBest, filterAndSort, authorMatchesExpected } = require("../utils/trackFilter");
+const { pickBest } = require("../utils/trackFilter");
 const { searchTracks, getAudioFeatures, getSeveralTracks, getArtists, getRecommendations } = require("./spotify");
 
 const EXCLUDE_WORDS = [
@@ -268,12 +268,7 @@ function computeSetProfile(selectedSongs, enriched, likedSongs) {
   };
 }
 
-function resolveTrack(player, query) {
-  const artistName = query.split(" - ")[0]?.trim() || "";
-  return _resolveTrack(player, query, artistName);
-}
-
-async function _resolveTrack(player, query, artistName) {
+async function resolveTrack(player, query) {
   const sources = ["ytmsearch", "ytsearch"];
   for (const source of sources) {
     try {
@@ -282,17 +277,11 @@ async function _resolveTrack(player, query, artistName) {
         { username: "DJ", id: "dj" }
       );
       if (!result?.tracks?.length) continue;
-
-      // First pass: prefer tracks whose author matches the expected artist
-      const sorted = filterAndSort(result.tracks);
-      for (const t of sorted) {
-        if (authorMatchesExpected(t, artistName)) return t;
-      }
-
-      // Fallback: any non-excluded track
       const best = pickBest(result.tracks, () => false);
       if (best?.track) return best.track;
-
+      for (const t of result.tracks) {
+        if (!shouldExclude(t.info?.title || "")) return t;
+      }
       return result.tracks[0];
     } catch {}
   }
