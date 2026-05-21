@@ -1,14 +1,85 @@
 const TTS_PRONUNCIATION = [
-  [/\b6ix9ine\b/gi, "six nine"],
+  // Artistas icónicos y bandas (mapeo fonético para es-MX edge-tts)
+  [/\bXXXTENTACION\b/gi, "ex ex ex tenteishon"],
+  [/\bThe Weeknd\b/gi, "de wikend"],
+  [/\bPost Malone\b/gi, "poust meloun"],
+  [/\bDaft Punk\b/gi, "daft pank"],
+  [/\bMarshmello\b/gi, "marshmelo"],
+  [/\bSkrillex\b/gi, "skrilex"],
+  [/\bCalvin Harris\b/gi, "calvin jérris"],
+  [/\b6ix9ine\b/gi, "six nain"],
   [/\b6ix\b/gi, "six"],
-  [/\b9ine\b/gi, "nine"],
-  [/\b21 savage\b/gi, "twenty one savage"],
+  [/\b9ine\b/gi, "nain"],
+  [/\bA\$AP Rocky\b/gi, "éi sap roki"],
+  [/\bAC\/DC\b/gi, "éi sí dí sí"],
+  [/\bDrake\b/gi, "dreik"],
+  [/\bFuture\b/gi, "fíucher"],
+  [/\bLil Wayne\b/gi, "lil uéin"],
+  [/\bTravis Scott\b/gi, "trávis scot"],
+  [/\bSnoop Dogg\b/gi, "snup dog"],
+  [/\bIce Cube\b/gi, "ais kiub"],
+  [/\bKanye West\b/gi, "kanié west"],
+  [/\bImagine Dragons\b/gi, "imáchin dragons"],
+  [/\bLinkin Park\b/gi, "linkin park"],
+  [/\bdeadmau5\b/gi, "ded maus"],
+  [/\bDJ Snake\b/gi, "di jei sneik"],
+  [/\bEminem\b/gi, "eminem"],
+  [/\b50 Cent\b/gi, "fifti sent"],
+  [/\b21 Savage\b/gi, "tuenti uan savage"],
+  [/\bPop Smoke\b/gi, "pop smouk"],
+  [/\bJuice WRLD\b/gi, "yius world"],
+  [/\bLil Nas X\b/gi, "lil nas ex"],
+  [/\bMetro Boomin\b/gi, "metro bumin"],
+  [/\bTyler,\s*The\s*Creator\b/gi, "tailer de criéitor"],
+  [/\bChildish\s*Gambino\b/gi, "cháidish gambino"],
+  [/\bKendrick\s*Lamar\b/gi, "kendrik lamar"],
+  [/\bJ\.\s*Cole\b/gi, "jei coul"],
+  [/\bPlayboi\s*Carti\b/gi, "pleiboi carti"],
+  [/\bCardi\s*B\b/gi, "cardi bi"],
+  [/\bNicki\s*Minaj\b/gi, "niki minásh"],
+  [/\bDoja\s*Cat\b/gi, "doya cat"],
+  [/\bAriana\s*Grande\b/gi, "ariana grándei"],
+  [/\bDua\s*Lipa\b/gi, "dua lipa"],
+  [/\bOlivia\s*Rodrigo\b/gi, "olivia rodrigo"],
+  [/\bBillie\s*Eilish\b/gi, "bili ailish"],
+  [/\bTaylor\s*Swift\b/gi, "teilor swift"],
+  [/\bHarry\s*Styles\b/gi, "jarry stails"],
+  [/\bEd\s*Sheeran\b/gi, "ed shíran"],
+  [/\bBruno\s*Mars\b/gi, "bruno mars"],
+  [/\bJustin\s*Bieber\b/gi, "yustin biber"],
+  [/\bShawn\s*Mendes\b/gi, "shon mendes"],
+  [/\bSelena\s*Gomez\b/gi, "selena gómez"],
+  [/\bCamila\s*Cabello\b/gi, "camila cabello"],
+  [/\bBebe\s*Rexha\b/gi, "bebé rexa"],
+  [/\bLady\s*Gaga\b/gi, "leidi gaga"],
+  [/\bRihanna\b/gi, "rihana"],
+  [/\bBeyoncé\b/gi, "biónsei"],
+  [/\bAdele\b/gi, "adél"],
+  [/\bColdplay\b/gi, "coldplei"],
+  [/\bOneRepublic\b/gi, "uan ripablik"],
+  [/\bGreen\s*Day\b/gi, "grin dei"],
+  [/\bMy\s*Chemical\s*Romance\b/gi, "mai kémical románs"],
+  [/\bFall\s*Out\s*Boy\b/gi, "fol aut boi"],
+  [/\bParamore\b/gi, "paramor"],
+  [/\bPanic!\s*At\s*The\s*Disco\b/gi, "panic at de disco"],
+  [/\bTwenty\s*One\s*Pilots\b/gi, "tuenti uan pailots"],
+  [/\bNirvana\b/gi, "nirvana"],
+  [/\bMetallica\b/gi, "metalica"],
+  [/\bSlipknot\b/gi, "slipnot"],
+  [/\bBring\s*Me\s*The\s*Horizon\b/gi, "bring mi de joraison"],
+  [/\bAvicii\b/gi, "avichi"],
+  [/\bMartin\s*Garrix\b/gi, "martin gárrix"],
+  [/\bAlan\s*Walker\b/gi, "alan uóker"],
+  [/\bKygo\b/gi, "kaigo"],
+  [/\bDavid\s*Guetta\b/gi, "david gueta"],
+  [/\bTiësto\b/gi, "tiesto"],
+  [/\bSteve\s*Aoki\b/gi, "stiv aoki"],
+  [/\bZedd\b/gi, "zed"],
+  [/\bThe\s*Chainsmokers\b/gi, "de cheinsmokers"],
+  [/\bMajor\s*Lazer\b/gi, "meiyor leiser"],
   [/\b24k\s?goldn\b/gi, "twenty four karat golden"],
   [/\b2pac\b/gi, "two pac"],
-  [/\b50 cent\b/gi, "fifty cent"],
   [/\b6lack\b/gi, "black"],
-  [/\$ap\b/gi, "money ap"],
-  [/\bXXXTentacion\b/gi, "triple ex tentacion"],
   [/\bHalsey\b/gi, "halsey"],
   [/\bB[oó]y Hars[hi]ss\b/gi, "boy harshish"],
   [/\bMitski\b/gi, "mitski"],
@@ -18,8 +89,6 @@ const TTS_PRONUNCIATION = [
   [/\bRina\s+Sawayama\b/gi, "rina sawayama"],
   [/\bJPEGMafia\b/gi, "jpeg mafia"],
   [/\bDeath\s+Grips\b/gi, "death grips"],
-  [/\bTyler,\s*the\s+Creator\b/gi, "tyler the creator"],
-  [/\bChildish\s+Gambino\b/gi, "childish gambino"],
   [/\bMgmt\b/gi, "em gee em tee"],
   [/\bAnuel\s+AA\b/gi, "anuel doble a"],
   [/\bArcángel\b/gi, "arkangel"],
@@ -42,8 +111,14 @@ const TTS_PRONUNCIATION = [
 function fixTTS(text) {
   if (!text) return "";
   
+  // A. Reemplazar "feat." y "ft." por "con"
+  let t = text.replace(/\bfeat\.?\b/gi, "con").replace(/\bft\.?\b/gi, "con");
+
+  // B. Reemplazar "&" por "y"
+  t = t.replace(/&/g, "y");
+
   // 1. Reemplazar el símbolo '#' por la palabra 'número ' para que suene natural
-  let t = text.replace(/#/g, "número ");
+  t = t.replace(/#/g, "número ");
 
   // 2. Eliminar emojis usando la propiedad Unicode 'Extended_Pictographic' (Node 10+)
   t = t.replace(/\p{Extended_Pictographic}/gu, "");
@@ -54,7 +129,7 @@ function fixTTS(text) {
   // 4. Limpiar espacios múltiples redundantes
   t = t.replace(/\s+/g, " ").trim();
 
-  // 5. Aplicar reglas de pronunciación personalizadas (e.g. 6ix9ine -> six nine)
+  // 5. Aplicar reglas de pronunciación personalizadas (e.g. 6ix9ine -> six nain)
   for (const [pattern, replacement] of TTS_PRONUNCIATION) {
     t = t.replace(pattern, replacement);
   }
