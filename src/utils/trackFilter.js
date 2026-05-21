@@ -55,6 +55,7 @@ const EXCLUDE_PATTERNS = [
   /\bmixtape\b/i,
   /\b(live|dj|acoustic|studio)\s+set\b/i,
   /\bset\s+mix\b/i,
+  /\blive\b/i,
 ];
 
 // ── Soft variant words (used only for scoring / deprioritisation) ─────────────
@@ -90,7 +91,8 @@ const OFFICIAL_TITLE_PATTERNS = [
 function isExcluded(title) {
   if (!title) return false;
   const lower = title.toLowerCase();
-  return EXCLUDE_TERMS.some((term) => lower.includes(term));
+  return EXCLUDE_TERMS.some((term) => lower.includes(term)) ||
+         EXCLUDE_PATTERNS.some((re) => re.test(title));
 }
 
 /**

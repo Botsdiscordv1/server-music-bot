@@ -21,7 +21,8 @@ const VARIANT_WORDS = [
 function shouldExclude(title) {
   if (!title) return false;
   const lower = title.toLowerCase();
-  return EXCLUDE_WORDS.some(w => lower.includes(w));
+  return EXCLUDE_WORDS.some(w => lower.includes(w)) ||
+         /\blive\b/i.test(title);
 }
 
 function hasVariantTag(title) {
