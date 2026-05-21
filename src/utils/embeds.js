@@ -44,8 +44,8 @@ function nowPlayingEmbed(track, player, forcedPosition = null) {
     .setThumbnail(formatThumbnail(track.info.artworkUrl))
     .addFields(
       { name: sourceLabel(track), value: "\u200B", inline: true },
-      { name: "🔊 Volume", value: `${player.volume}%`, inline: true },
-      { name: "🔁 Loop", value: loopLabel(player.repeatMode), inline: true }
+      { name: `🔊 ${player.volume}%`, value: "\u200B", inline: true },
+      { name: `<:loop:1506813539292287046> ${loopLabel(player.repeatMode)}`, value: "\u200B", inline: true }
     )
     .setFooter({ text: `Requested by ${track.requester?.username || "Unknown"}` });
 }
@@ -147,7 +147,7 @@ function formatTime(ms) {
 }
 
 function loopLabel(mode) {
-  const modes = { none: "Off", track: "Track 🔂", queue: "Queue 🔁" };
+  const modes = { none: "Off", track: "Track", queue: "Queue" };
   return modes[mode] || "Off";
 }
 
