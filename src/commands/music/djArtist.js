@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const { requireVoiceChannel } = require("../../utils/checks");
 const { errorEmbed } = require("../../utils/embeds");
 const { getLikedSongs, getDislikedKeys } = require("../../database");
 const { generateArtistSet } = require("../../services/djEngine");
@@ -183,15 +182,24 @@ module.exports = {
     ),
 
   async execute(interaction, client) {
+    let deferred = false;
     try {
       await interaction.deferReply();
+      deferred = true;
     } catch (e) {
-      return console.error("[DJ Artist] deferReply failed:", e.message);
+      console.error("[DJ Artist] deferReply failed:", e.message);
     }
 
+    const reply = (embed) => {
+      if (deferred) return interaction.editReply({ embeds: [embed] }).catch(() => {});
+      return interaction.channel?.send({ embeds: [embed] }).catch(() => {});
+    };
+
     try {
-      const voiceChannel = await requireVoiceChannel(interaction);
-      if (!voiceChannel) return;
+      const voiceChannel = interaction.member?.voice?.channel;
+      if (!voiceChannel) {
+        return reply(errorEmbed("Debes estar en un canal de voz."));
+      }
 
       const player = client.lavalink.getPlayer(interaction.guildId) ||
         await client.lavalink.createPlayer({
@@ -215,14 +223,14 @@ module.exports = {
         }
         if (kept.length > 0) player.queue.add(kept);
         const artistName = player._djArtistName || "";
-        return interaction.editReply({ embeds: [new EmbedBuilder()
+        return reply(new EmbedBuilder()
           .setColor(0xff6b6b)
           .setDescription(
             kept.length > 0
               ? `⏹️ Modo Artista **${artistName}** desactivado. ${kept.length} canciones manuales conservadas.`
               : `⏹️ Modo Artista **${artistName}** desactivado.`
           )
-        ]});
+        );
       }
 
       // Toggle off regular DJ mode first if active
@@ -254,14 +262,14 @@ module.exports = {
           )
           .setFooter({ text: "5 likeadas · 5 recomendadas" });
 
-        return interaction.editReply({ embeds: [embed] });
+        return reply(embed);
       } else {
         if (typeof player.stopPlaying === "function") await player.stopPlaying();
 
         await initArtistDJ(player, interaction.user.id, artistName, client);
 
         if (player.queue.tracks.length === 0) {
-          return interaction.editReply({ embeds: [errorEmbed(`No se encontraron canciones de **${artistName}** en Tus Me Gusta.`)] });
+          return reply(errorEmbed(`No se encontraron canciones de **${artistName}** en Tus Me Gusta.`));
         }
 
         await player.play({ paused: false });
@@ -273,11 +281,11 @@ module.exports = {
           .setDescription(`Sets de 10 canciones enfocados en **${artistName}**.\n5 likeadas + 5 recomendadas`)
           .setFooter({ text: "Powered by Spotify & YouTube Music" });
 
-        await interaction.editReply({ embeds: [embed] });
+        await reply(embed);
       }
     } catch (e) {
       console.error("[DJ Artist] Error:", e);
-      try { await interaction.editReply({ embeds: [errorEmbed(`Error: ${e.message}`)] }); } catch {}
+      try { reply(errorEmbed(`Error: ${e.message}`)); } catch {}
     }
   },
 };

@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const { requireVoiceChannel } = require("../../utils/checks");
 const { errorEmbed } = require("../../utils/embeds");
 const { getLikedSongs, getMostPlayedTracks, getDislikedKeys } = require("../../database");
 const { isExcluded, isVariant } = require("../../utils/trackFilter");
@@ -233,15 +232,24 @@ module.exports = {
     .setDescription("Modo DJ — sets inteligentes de 10 canciones basados en tus gustos."),
 
   async execute(interaction, client) {
+    let deferred = false;
     try {
       await interaction.deferReply();
+      deferred = true;
     } catch (e) {
-      return console.error("[DJ] deferReply failed:", e.message);
+      console.error("[DJ] deferReply failed:", e.message);
     }
 
+    const reply = (embed) => {
+      if (deferred) return interaction.editReply({ embeds: [embed] }).catch(() => {});
+      return interaction.channel?.send({ embeds: [embed] }).catch(() => {});
+    };
+
     try {
-      const voiceChannel = await requireVoiceChannel(interaction);
-      if (!voiceChannel) return;
+      const voiceChannel = interaction.member?.voice?.channel;
+      if (!voiceChannel) {
+        return reply(errorEmbed("Debes estar en un canal de voz."));
+      }
 
       const player = client.lavalink.getPlayer(interaction.guildId) ||
         await client.lavalink.createPlayer({
@@ -263,14 +271,14 @@ module.exports = {
           await player.queue.splice(0, player.queue.tracks.length);
         }
         if (kept.length > 0) player.queue.add(kept);
-        return interaction.editReply({ embeds: [new EmbedBuilder()
+        return reply(new EmbedBuilder()
           .setColor(0xff6b6b)
           .setDescription(
             kept.length > 0
               ? `⏹️ Modo DJ desactivado. ${kept.length} canciones manuales conservadas.`
               : "⏹️ Modo DJ desactivado."
           )
-        ]});
+        );
       }
 
       const isPlaying = player.playing && player.queue.current;
@@ -294,14 +302,14 @@ module.exports = {
           )
           .setFooter({ text: "Powered by Spotify & YouTube Music" });
 
-        return interaction.editReply({ embeds: [embed] });
+        return reply(embed);
       } else {
         if (typeof player.stopPlaying === "function") await player.stopPlaying();
 
         await initDJ(player, interaction.user.id, client);
 
         if (player.queue.tracks.length === 0) {
-          return interaction.editReply({ embeds: [errorEmbed("No se pudieron generar recomendaciones. Agrega canciones a ❤️ Tus Me Gusta primero.")] });
+          return reply(errorEmbed("No se pudieron generar recomendaciones. Agrega canciones a ❤️ Tus Me Gusta primero."));
         }
 
         await player.play({ paused: false });
@@ -317,11 +325,11 @@ module.exports = {
           )
           .setFooter({ text: "Powered by Spotify & YouTube Music" });
 
-        await interaction.editReply({ embeds: [embed] });
+        await reply(embed);
       }
     } catch (e) {
       console.error("[DJ] Error:", e);
-      try { await interaction.editReply({ embeds: [errorEmbed(`Error: ${e.message}`)] }); } catch {}
+      try { reply(errorEmbed(`Error: ${e.message}`)); } catch {}
     }
   },
 };
