@@ -591,4 +591,4 @@ async function generateArtistSet(player, likedSongs, artistName) {
   };
 }
 
-module.exports = { generateSet, generateArtistSet };
+module.exports = { generateSet, generateArtistSet, resolveLikedTrack };

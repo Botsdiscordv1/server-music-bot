@@ -143,6 +143,30 @@ async function generateBatch(player, count = 10) {
     }
   }
 
+  // Fill remaining slots with additional liked songs if set is short
+  if (batch.length < count && likedSongs.length > 0) {
+    const { resolveLikedTrack } = require("../../services/djEngine");
+    const remaining = likedSongs.filter(s => {
+      const key = `${s.track_author} - ${s.track_title}`.trim();
+      return !dislikedKeys.has(key);
+    });
+    for (const song of remaining) {
+      if (batch.length >= count) break;
+      const trackKey = `${song.track_author} - ${song.track_title}`.trim();
+      if (playedIds.has(trackKey)) continue;
+      const track = await resolveLikedTrack(player, song).catch(() => null);
+      if (!track) continue;
+      if (isPlayed(track)) continue;
+      if (shouldDiscard(track.info?.title || "")) continue;
+      const titleKey = (track.info?.title || "").toLowerCase();
+      if (usedTitleKeys.has(titleKey)) continue;
+      batch.push(track);
+      usedTitleKeys.add(titleKey);
+      playedIds.add(track.info?.identifier);
+      playedTitles.add(track.info?.title?.toLowerCase());
+    }
+  }
+
   player._djPlayedIds = playedIds;
   player._djPlayedTitles = playedTitles;
   return { batch, profile: result.profile };
