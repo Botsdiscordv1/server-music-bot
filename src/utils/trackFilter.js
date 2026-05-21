@@ -34,6 +34,8 @@ const EXCLUDE_TERMS = [
   "music video",
   "dj mix",
   "mixtape",
+  "4k",
+  "letra",
 ];
 
 // Retained for backward compatibility
@@ -56,6 +58,8 @@ const EXCLUDE_PATTERNS = [
   /\b(live|dj|acoustic|studio)\s+set\b/i,
   /\bset\s+mix\b/i,
   /\blive\b/i,
+  /\b4k\b/i,
+  /\bletra\b/i,
 ];
 
 // ── Soft variant words (used only for scoring / deprioritisation) ─────────────

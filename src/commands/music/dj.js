@@ -112,40 +112,45 @@ async function generateBatch(player, count = 10) {
   });
   if (!filtered.length) return { batch: [], profile: null };
 
-  const result = await generateSet(player, filtered);
-
-  if (!result.tracks.length) return { batch: [], profile: null };
-
   const batch = [];
   const usedTitleKeys = new Set();
+  let attempts = 0;
+  let lastResult = null;
 
-  for (const track of result.tracks) {
-    if (batch.length >= count) break;
-    if (isPlayed(track)) continue;
-    if (shouldDiscard(track.info?.title || "")) continue;
+  while (batch.length < count && attempts < 5) {
+    attempts++;
+    const result = await generateSet(player, filtered);
+    if (!result.tracks.length) break;
+    lastResult = result;
 
-    const trackKey = getTrackKey(track);
-    if (dislikedKeys.has(trackKey.toLowerCase()) || dislikedKeys.has(trackKey)) continue;
+    for (const track of result.tracks) {
+      if (batch.length >= count) break;
+      if (isPlayed(track)) continue;
+      if (shouldDiscard(track.info?.title || "")) continue;
 
-    const titleKey = (track.info?.title || "").toLowerCase();
-    if (usedTitleKeys.has(titleKey)) continue;
+      const trackKey = getTrackKey(track);
+      if (dislikedKeys.has(trackKey.toLowerCase()) || dislikedKeys.has(trackKey)) continue;
 
-    batch.push(track);
-    usedTitleKeys.add(titleKey);
-    playedIds.add(track.info?.identifier);
-    playedTitles.add(track.info?.title?.toLowerCase());
+      const titleKey = (track.info?.title || "").toLowerCase();
+      if (usedTitleKeys.has(titleKey)) continue;
+
+      batch.push(track);
+      usedTitleKeys.add(titleKey);
+      playedIds.add(track.info?.identifier);
+      playedTitles.add(track.info?.title?.toLowerCase());
+    }
   }
 
-  if (batch.length === 0) {
-    const track = result.tracks[0];
-    if (track && !isPlayed(track)) {
-      batch.push(track);
+  if (batch.length === 0 && lastResult?.tracks?.[0]) {
+    const fallback = lastResult.tracks[0];
+    if (!isPlayed(fallback)) {
+      batch.push(fallback);
     }
   }
 
   player._djPlayedIds = playedIds;
   player._djPlayedTitles = playedTitles;
-  return { batch, profile: result.profile };
+  return { batch, profile: lastResult?.profile || null };
 }
 
 // Local TTS logic replaced by central ttsService.js
@@ -157,13 +162,19 @@ function generateSetDescription(profile, batch, player) {
   const secondArtist = batch[1]?.info?.author || "";
   const setNum = (player?._djSetNumber || 1);
 
+  const bpmFallbacks = ["buen ritmo", "ritmo variado", "flow constante", "vibra única", "sonido fresco"];
   const bpmDesc = profile?.avgBpm
     ? (profile.avgBpm > 120 ? "ritmo rápido" : profile.avgBpm > 90 ? "ritmo medio" : "ritmo lento")
-    : "";
+    : bpmFallbacks[Math.floor(Math.random() * bpmFallbacks.length)];
 
   const energyDesc = profile?.avgEnergy != null
     ? (profile.avgEnergy > 0.7 ? "alta energía" : profile.avgEnergy > 0.4 ? "energía media" : "ambiente relajado")
     : "";
+
+  const genreFallbacks = ["música variada", "sonidos diversos", "estilos variados", "mezcla única", "ritmos variados", "canciones seleccionadas"];
+  const genreStr = genres.length
+    ? `${genres.slice(0, 3).join(" y ")}`
+    : genreFallbacks[Math.floor(Math.random() * genreFallbacks.length)];
 
   const emojis = ["🔥", "🎵", "🎶", "✨", "🎧", "⚡", "💿", "📀", "🎤", "🎸", "🎹", "🥁"];
   const mood = emojis[Math.floor(Math.random() * emojis.length)];
@@ -171,7 +182,6 @@ function generateSetDescription(profile, batch, player) {
   // Track used templates per player to avoid repeats
   if (!player?._djUsedTemplates) player._djUsedTemplates = [];
   const used = new Set(player._djUsedTemplates);
-
   const pick = (arr) => {
     const pool = arr.filter(t => !used.has(t));
     if (!pool.length) {
@@ -184,56 +194,59 @@ function generateSetDescription(profile, batch, player) {
     return picked;
   };
 
-  const templates = [];
   const epithet = ARTIST_EPITHETS[firstArtist.toLowerCase()];
+  const epithetLine = epithet ? `${epithet}, ` : "";
+  const setRef = setNum > 2 ? `Set número ${setNum}. ` : "";
+  const energyLine = energyDesc ? `, ${energyDesc}` : "";
 
-  if (epithet) {
-    templates.push(
-      `${mood} Sube el volumen que ya llegó ${epithet} a mejorar el ambiente.`,
-      `${mood} Se abre el telón para ${epithet}. Disfruta del show.`,
-      `${mood} Momento de altura: suena ${epithet}.`,
-      `${mood} Atención, ${epithet} está en la casa. Arrancamos.`,
-      `${mood} Nadie se mueva, ${epithet} acaba de entrar al estudio.`,
-    );
-  }
+  const env = { mood, firstArtist, secondArtist, genreStr, bpmDesc, energyLine, epithetLine, setRef };
 
-  if (genres.length) {
-    templates.push(
-      `${mood} Mezcla de ${genres.slice(0, 3).join(" y ")}, con ${bpmDesc || "buen ritmo"}. Arrancando con **${firstArtist}**…`,
-      `${mood} La sesión de hoy trae ${genres.slice(0, 2).join(" y ") || "buena música"}, ${energyDesc}. **${firstArtist}** abre el set.`,
-      `${mood} De vuelta con ${genres[0] || "música"}, ${bpmDesc}. Empezamos con **${firstArtist}**…`,
-      `${mood} ${genres.slice(0, 2).join(" y ")} del bueno. **${firstArtist}** nos prende desde el vamos.`,
-      `${mood} Taca taca taca — puro ${genres[0] || "sabor"} para tus oídos. Cortesía de **${firstArtist}**.`,
-      `${mood} Esto suena a ${genres.slice(0, 2).join(" con ")}, cortesía de **${firstArtist}**.`,
-    );
-  }
+  const templates = [];
 
+  // ── Epithet-based ─────────────────────────────────────────────────
   templates.push(
-    `${mood} Set listo para ti. **${firstArtist}** nos pone en ambiente…`,
-    `${mood} Nueva tanda de canciones, arrancando con **${firstArtist}**.`,
-    `${mood} Suena **${firstArtist}** para empezar con todo este set.`,
-    `${mood} ¿Listo? **${firstArtist}** abre la sesión de hoy.`,
-    `${mood} Dale play y déjate llevar. **${firstArtist}** empieza el viaje.`,
-    `${mood} Sube el volumen que arranca **${firstArtist}**.`,
-    `${mood} Esto recién empieza. **${firstArtist}** pone la primera piedra.`,
-    `${mood} **${firstArtist}** al mando. Que suene.`,
-    `${mood} Play. **${firstArtist}** no necesita presentación.`,
-    `${mood} Arrancamos con todo. **${firstArtist}** al micrófono.`,
+    `${mood} Sube el volumen que ya llegó ${epithetLine}para poner ${genreStr} con ${bpmDesc}${energyLine}. Arranca **${firstArtist}**.`,
+    `${mood} Se abre el telón para ${epithetLine}en un set de ${genreStr}, ${bpmDesc}${energyLine}. **${firstArtist}** al mando.`,
+    `${mood} Atención, ${epithetLine}está en la casa. Mezcla de ${genreStr} con ${bpmDesc}${energyLine}. Suena **${firstArtist}**.`,
+    `${mood} Nadie se mueva, ${epithetLine}acaba de llegar con ${genreStr}, ${bpmDesc}${energyLine}. Disfruta de **${firstArtist}**.`,
   );
 
+  // ── Genre-based ───────────────────────────────────────────────────
+  templates.push(
+    `${mood} Mezcla de ${genreStr}, ${bpmDesc}${energyLine}. Arrancando con **${firstArtist}** para este nuevo set.`,
+    `${mood} La sesión de hoy trae ${genreStr}, ${bpmDesc}${energyLine}. **${firstArtist}** abre el set con todo.`,
+    `${mood} De vuelta con ${genreStr}, ${bpmDesc}${energyLine}. Empezamos con **${firstArtist}**…`,
+    `${mood} Puro ${genreStr} del bueno, ${bpmDesc}${energyLine}. **${firstArtist}** nos prende desde el vamos.`,
+    `${mood} Esto suena a ${genreStr}, ${bpmDesc}${energyLine}. Cortesía de **${firstArtist}**.`,
+    `${mood} Taca taca taca — puro ${genreStr}, ${bpmDesc}${energyLine}. Llega **${firstArtist}**.`,
+  );
+
+  // ── Generic ───────────────────────────────────────────────────────
+  templates.push(
+    `${mood} Set listo con ${genreStr}, ${bpmDesc}${energyLine}. **${firstArtist}** nos pone en ambiente.`,
+    `${mood} Nueva tanda de canciones: ${genreStr}, ${bpmDesc}${energyLine}. Arranca **${firstArtist}**.`,
+    `${mood} Suena **${firstArtist}** para empezar con todo. ${genreStr}, ${bpmDesc}${energyLine}.`,
+    `${mood} Dale play y déjate llevar. **${firstArtist}** empieza el viaje con ${genreStr}, ${bpmDesc}${energyLine}.`,
+    `${mood} Esto recién empieza. **${firstArtist}** pone la primera piedra con ${genreStr}, ${bpmDesc}${energyLine}.`,
+    `${mood} Arrancamos con todo. **${firstArtist}** al micrófono con ${genreStr}, ${bpmDesc}${energyLine}.`,
+    `${mood} ¿Listo? **${firstArtist}** abre la sesión de hoy con ${genreStr}, ${bpmDesc}${energyLine}.`,
+    `${mood} Play. **${firstArtist}** no necesita presentación. ${genreStr}, ${bpmDesc}${energyLine}.`,
+  );
+
+  // ── Second artist ────────────────────────────────────────────────
   if (secondArtist && secondArtist !== firstArtist) {
     templates.push(
-      `${mood} De **${firstArtist}** a **${secondArtist}**, esto se pone bueno.`,
-      `${mood} **${firstArtist}** abre, **${secondArtist}** continúa. Buen set en camino.`,
-      `${mood} Dos artistas, un solo set. **${firstArtist}** → **${secondArtist}**.`,
+      `${mood} De **${firstArtist}** a **${secondArtist}**, esto se pone bueno. ${genreStr}, ${bpmDesc}${energyLine}.`,
+      `${mood} **${firstArtist}** abre, **${secondArtist}** continúa. ${genreStr}, ${bpmDesc}${energyLine}. Buen set en camino.`,
+      `${mood} Dos artistas, un solo set. **${firstArtist}** → **${secondArtist}**. ${genreStr}, ${bpmDesc}${energyLine}.`,
     );
   }
 
-  // Set number references for later sets
+  // ── Set number ───────────────────────────────────────────────────
   if (setNum > 2) {
     templates.push(
-      `${mood} Set número ${setNum}. La fiesta no para. Arranca **${firstArtist}**.`,
-      `${mood} Vamos por el set ${setNum}. **${firstArtist}** abre la siguiente ronda.`,
+      `${mood} ${setRef}${genreStr}, ${bpmDesc}${energyLine}. Arranca **${firstArtist}**.`,
+      `${mood} ${setRef}**${firstArtist}** abre la siguiente ronda con ${genreStr}, ${bpmDesc}${energyLine}.`,
     );
   }
 

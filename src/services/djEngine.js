@@ -7,6 +7,7 @@ const EXCLUDE_WORDS = [
   "speedup", "slowed + reverb",
   "official video", "official music video", "official lyric video",
   "music video", "dj mix", "mixtape",
+  "4k",
 ];
 
 const VARIANT_WORDS = [
@@ -22,7 +23,9 @@ function shouldExclude(title) {
   if (!title) return false;
   const lower = title.toLowerCase();
   return EXCLUDE_WORDS.some(w => lower.includes(w)) ||
-         /\blive\b/i.test(title);
+         /\blive\b/i.test(title) ||
+         /\b4k\b/i.test(title) ||
+         /\bletra\b/i.test(title);
 }
 
 function hasVariantTag(title) {
@@ -386,7 +389,7 @@ async function ytmRecommendations(player, selectedSongs, likedSongs, count = 4) 
       if (!result?.tracks?.length) continue;
       let taken = 0;
       for (const track of result.tracks) {
-        if (resolved.length >= count || taken >= 2) break;
+        if (resolved.length >= count || taken >= 3) break;
         const title = track.info?.title || "";
         if (shouldExclude(title)) continue;
         const key = `${authorKey(track.info?.author || "")}::${titleKey(title)}`;
@@ -404,7 +407,7 @@ async function ytmRecommendations(player, selectedSongs, likedSongs, count = 4) 
     const songQueries = shuffle(selectedSongs)
       .map(s => s.track_title)
       .filter(Boolean)
-      .slice(0, 6);
+      .slice(0, 10);
     for (const title of songQueries) {
       if (resolved.length >= count) break;
       try {
@@ -526,7 +529,7 @@ async function generateSet(player, likedSongs) {
   const cluster = pickCluster(clusters, player._lastDjCluster);
   player._lastDjCluster = cluster.label;
 
-  let selectedSongs = pickSongs(cluster, 6);
+  let selectedSongs = pickSongs(cluster, 8);
 
   // Diversify: max 2 songs per artist in the set
   selectedSongs = diversifySongs(selectedSongs, likedSongs, 2);
@@ -540,9 +543,12 @@ async function generateSet(player, likedSongs) {
 
   const profile = computeSetProfile(selectedSongs, enriched, likedSongs);
 
+  // Resolve liked tracks — try from pool until we have exactly 6
   const likedTracks = [];
   const usedTitleKeys = new Set();
-  for (const song of shuffle(selectedSongs)) {
+  const tryPool = shuffle(likedSongs);
+  for (const song of tryPool) {
+    if (likedTracks.length >= 6) break;
     const key = titleKey(song.track_title);
     if (usedTitleKeys.has(key)) continue;
     const track = await resolveLikedTrack(player, song);
@@ -552,11 +558,21 @@ async function generateSet(player, likedSongs) {
     }
   }
 
-  let recommendedTracks = await ytmRecommendations(player, selectedSongs, likedSongs, 4);
+  // Determine how many recommendations we need (always aim for 10)
+  const targetRecs = Math.max(4, 10 - likedTracks.length);
 
-  if (recommendedTracks.length < 4) {
-    const fallback = await spotifyRecommendations(player, selectedSongs, profile, enriched, likedSongs, 4 - recommendedTracks.length);
+  let recommendedTracks = await ytmRecommendations(player, selectedSongs, likedSongs, targetRecs + 2);
+
+  if (recommendedTracks.length < targetRecs) {
+    const fallback = await spotifyRecommendations(player, selectedSongs, profile, enriched, likedSongs, targetRecs - recommendedTracks.length);
     recommendedTracks = [...recommendedTracks, ...fallback];
+  }
+
+  // If still not enough, try to get more from Spotify
+  if (likedTracks.length + recommendedTracks.length < 10) {
+    const needed = 10 - likedTracks.length - recommendedTracks.length;
+    const more = await spotifyRecommendations(player, selectedSongs, profile, enriched, likedSongs, needed + 2);
+    recommendedTracks = [...recommendedTracks, ...more];
   }
 
   const allTracks = [...likedTracks, ...recommendedTracks];
@@ -587,12 +603,15 @@ async function generateArtistSet(player, likedSongs, artistName) {
 
   if (!artistSongs.length) return { tracks: [], likedUsed: 0, recommendedUsed: 0 };
 
-  const seedSongs = shuffle(artistSongs).slice(0, 5);
+  const seedSongs = shuffle(artistSongs).slice(0, 7);
   const profile = computeSetProfile(seedSongs, enriched, likedSongs);
 
+  // Resolve liked tracks — try all artist songs until we have 5
   const likedTracks = [];
   const usedTitleKeys = new Set();
-  for (const song of shuffle(seedSongs)) {
+  const tryPool = shuffle(artistSongs);
+  for (const song of tryPool) {
+    if (likedTracks.length >= 5) break;
     const key = titleKey(song.track_title);
     if (usedTitleKeys.has(key)) continue;
     const track = await resolveLikedTrack(player, song);
@@ -602,10 +621,18 @@ async function generateArtistSet(player, likedSongs, artistName) {
     }
   }
 
-  let recommendedTracks = await ytmRecommendations(player, seedSongs, likedSongs, 5);
-  if (recommendedTracks.length < 5) {
-    const fallback = await spotifyRecommendations(player, seedSongs, profile, enriched, likedSongs, 5 - recommendedTracks.length);
+  const targetRecs = Math.max(5, 10 - likedTracks.length);
+
+  let recommendedTracks = await ytmRecommendations(player, seedSongs, likedSongs, targetRecs + 2);
+  if (recommendedTracks.length < targetRecs) {
+    const fallback = await spotifyRecommendations(player, seedSongs, profile, enriched, likedSongs, targetRecs - recommendedTracks.length);
     recommendedTracks = [...recommendedTracks, ...fallback];
+  }
+
+  if (likedTracks.length + recommendedTracks.length < 10) {
+    const needed = 10 - likedTracks.length - recommendedTracks.length;
+    const more = await spotifyRecommendations(player, seedSongs, profile, enriched, likedSongs, needed + 2);
+    recommendedTracks = [...recommendedTracks, ...more];
   }
 
   const allTracks = [...likedTracks, ...recommendedTracks];

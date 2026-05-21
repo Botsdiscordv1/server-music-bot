@@ -241,6 +241,27 @@ async function removeLikedSong(userId, id) {
   return target;
 }
 
+async function removeLikedSongByTrack(userId, track) {
+  await whenReady(() => {});
+  const url = track?.info?.uri;
+  if (url) {
+    const deleted = await LikedSong.deleteOne({ userId, trackUrl: url });
+    return deleted.deletedCount > 0;
+  }
+  const isrc = extractIsrc(track);
+  if (isrc) {
+    const deleted = await LikedSong.deleteOne({ userId, isrc });
+    if (deleted.deletedCount > 0) return true;
+  }
+  const title = track?.info?.title;
+  const author = track?.info?.author ? cleanAuthor(track.info.author) : "";
+  if (title && author) {
+    const deleted = await LikedSong.deleteOne({ userId, trackTitle: title, trackAuthor: author });
+    if (deleted.deletedCount > 0) return true;
+  }
+  return false;
+}
+
 async function removeAllLikedSongs(userId) {
   await whenReady(() => {});
   const result = await LikedSong.deleteMany({ userId });
@@ -266,14 +287,20 @@ async function getLikedSongs(userId) {
 function isSongInLikes(likedSongs, track) {
   if (!track?.info || !likedSongs || likedSongs.length === 0) return false;
 
-  // Priority 1: ISRC match
+  // Priority 1: URL match (matches addLikedSong's uniqueness check)
+  const currentUrl = track.info.uri;
+  if (currentUrl && likedSongs.some(s => s.track_url === currentUrl)) {
+    return true;
+  }
+
+  // Priority 2: ISRC match
   const currentIsrc = extractIsrc(track);
   if (currentIsrc) {
     const isrcMatch = likedSongs.some(s => s.isrc && s.isrc === currentIsrc);
     if (isrcMatch) return true;
   }
 
-  // Priority 2: exact title + exact artist (case-insensitive, strict otherwise)
+  // Priority 3: exact title + exact artist (case-insensitive, strict otherwise)
   const currentTitle = (track.info.title || "").toLowerCase();
   const currentAuthor = (track.info.author || "").replace(/\s*-\s*topic$/i, "").toLowerCase().trim();
 
@@ -430,6 +457,7 @@ module.exports = {
   clearHistory,
   addLikedSong,
   removeLikedSong,
+  removeLikedSongByTrack,
   removeAllLikedSongs,
   getLikedSongs,
   isSongInLikes,

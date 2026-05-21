@@ -75,41 +75,47 @@ async function generateBatch(player, artistName, count = 10) {
   });
   if (!filtered.length) return { batch: [], profile: null };
 
-  const result = await generateArtistSet(player, filtered, artistName);
-  if (!result.tracks.length) return { batch: [], profile: null };
-
   const batch = [];
   const usedTitleKeys = new Set();
+  let attempts = 0;
+  let lastResult = null;
 
-  for (const track of result.tracks) {
-    if (batch.length >= count) break;
-    if (isPlayed(track)) continue;
+  while (batch.length < count && attempts < 5) {
+    attempts++;
+    const result = await generateArtistSet(player, filtered, artistName);
+    if (!result.tracks.length) break;
+    lastResult = result;
 
-    let author = track.info?.author || track.track_author || track.author || "";
-    author = author.replace(/\s*-\s*Topic$/i, "").trim();
-    const title = track.info?.title || track.track_title || track.title || "";
-    const trackKey = `${author} - ${title}`.trim();
+    for (const track of result.tracks) {
+      if (batch.length >= count) break;
+      if (isPlayed(track)) continue;
 
-    if (dislikedKeys.has(trackKey.toLowerCase()) || dislikedKeys.has(trackKey)) continue;
+      let author = track.info?.author || track.track_author || track.author || "";
+      author = author.replace(/\s*-\s*Topic$/i, "").trim();
+      const title = track.info?.title || track.track_title || track.title || "";
+      const trackKey = `${author} - ${title}`.trim();
 
-    const titleKey = (track.info?.title || "").toLowerCase();
-    if (usedTitleKeys.has(titleKey)) continue;
-    batch.push(track);
-    usedTitleKeys.add(titleKey);
-    playedIds.add(track.info?.identifier);
-    playedTitles.add(track.info?.title?.toLowerCase());
+      if (dislikedKeys.has(trackKey.toLowerCase()) || dislikedKeys.has(trackKey)) continue;
+
+      const titleKey = (track.info?.title || "").toLowerCase();
+      if (usedTitleKeys.has(titleKey)) continue;
+      batch.push(track);
+      usedTitleKeys.add(titleKey);
+      playedIds.add(track.info?.identifier);
+      playedTitles.add(track.info?.title?.toLowerCase());
+    }
   }
 
-  if (batch.length === 0) {
-    const track = result.tracks[0];
-    if (track && !isPlayed(track)) {
-      batch.push(track);
+  if (batch.length === 0 && lastResult?.tracks?.[0]) {
+    const fallback = lastResult.tracks[0];
+    if (!isPlayed(fallback)) {
+      batch.push(fallback);
     }
   }
 
   player._djPlayedIds = playedIds;
   player._djPlayedTitles = playedTitles;
-  return { batch, profile: result.profile };
+  return { batch, profile: lastResult?.profile || null };
 }
 
 async function refillArtistQueue(player, client) {
@@ -167,32 +173,22 @@ async function refillArtistQueue(player, client) {
       return picked;
     };
 
-    const descTemplates = [
-      `${mood} Sumérgete en **${artistName}**. Arrancando con **${firstArtist}**…`,
-      `${mood} Todo **${artistName}** para ti. Empezamos con **${firstArtist}**.`,
-      `${mood} Nueva sesión de **${artistName}**, abriendo con **${firstArtist}**…`,
-      `${mood} Especial **${artistName}** en tu reproductor. **${firstArtist}** suena primero.`,
-      `${mood} **${artistName}** suena diferente hoy. **${firstArtist}** nos introduce al viaje.`,
-      `${mood} Si te gusta **${artistName}**, esto te va a encantar. Arranca **${firstArtist}**.`,
-      `${mood} De los favoritos de **${artistName}**, **${firstArtist}** abre la sesión.`,
-      `${mood} **${artistName}** sin filtro. Primer track: **${firstArtist}**.`,
-      `${mood} **${artistName}** en su máxima expresión. Arranca **${firstArtist}**.`,
-      `${mood} Lo mejor de **${artistName}**. **${firstArtist}** abre el set.`,
-    ];
     const epithet = ARTIST_EPITHETS[artistName.toLowerCase()];
-    if (epithet) {
-      descTemplates.push(
-        `${mood} Set dedicado a ${epithet}. Arrancando con **${firstArtist}**…`,
-        `${mood} Momento de ${epithet}. Disfruta del set.`,
-        `${mood} Esto es ${epithet}. **${firstArtist}** nos guía.`,
-      );
-    }
-    if (setNum > 2) {
-      descTemplates.push(
-        `${mood} Set ${setNum} de **${artistName}**. Arranca **${firstArtist}**.`,
-        `${mood} Vamos con el set ${setNum}. **${artistName}** sigue sonando.`,
-      );
-    }
+    const epithetLine = epithet ? `${epithet}, ` : "";
+    const setRef = setNum > 2 ? `. Set número ${setNum}` : "";
+
+    const descTemplates = [
+      `${mood} Sumérgete en **${artistName}**, ${epithetLine}con lo mejor de su repertorio. Arrancando con **${firstArtist}**${setRef}.`,
+      `${mood} Todo **${artistName}** para ti, ${epithetLine}en una sesión especial. Empezamos con **${firstArtist}**${setRef}.`,
+      `${mood} Nueva sesión de **${artistName}**, ${epithetLine}abriendo con **${firstArtist}** para disfrutar de sus mejores temas${setRef}.`,
+      `${mood} Especial **${artistName}**${epithetLine}en tu reproductor. **${firstArtist}** suena primero${setRef}.`,
+      `${mood} **${artistName}** suena diferente hoy, ${epithetLine}con **${firstArtist}** guiándonos en este viaje musical${setRef}.`,
+      `${mood} Si te gusta **${artistName}**, ${epithetLine}esto te va a encantar. Arranca **${firstArtist}**${setRef}.`,
+      `${mood} De los favoritos de **${artistName}**, ${epithetLine}**${firstArtist}** abre la sesión con toda la energía${setRef}.`,
+      `${mood} **${artistName}** sin filtro, ${epithetLine}en su máxima expresión. Primer track: **${firstArtist}**${setRef}.`,
+      `${mood} **${artistName}** en su máxima expresión, ${epithetLine}arranca **${firstArtist}** con un set imperdible${setRef}.`,
+      `${mood} Lo mejor de **${artistName}**, ${epithetLine}con **${firstArtist}** abriendo el set para ti${setRef}.`,
+    ];
     const description = pick(descTemplates);
 
     // Queue TTS intro then the batch
