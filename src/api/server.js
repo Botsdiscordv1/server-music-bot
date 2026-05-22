@@ -47,26 +47,22 @@ app.get("/api/search", requireApiKey, async (req, res) => {
   }
 });
 
+// src/api/server.js - Actualizado
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: "Missing 'id' parameter" });
 
-    const info = await play.video_info(id);
-
-    // CORREGIDO: Es .formats (con s)
-    const stream = info.formats
-      .filter(f => f.hasAudio && !f.hasVideo)
-      .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
-
-    if (!stream) return res.status(404).json({ error: "No audio stream found" });
+    // Método más estable para obtener el stream directo
+    const stream = await play.stream(id, { quality: 2 });
 
     res.json({ url: stream.url });
   } catch (err) {
     console.error("Stream Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "No se pudo obtener el audio" });
   }
 });
+
 
 app.get("/api/lyrics", requireApiKey, async (req, res) => {
   try {
