@@ -41,8 +41,7 @@ function createClient() {
       defaultSearchPlatform: "ytmsearch",
       volumeDecrementer: 0.75,
       onDisconnect: {
-        destroyPlayer: false,
-        autoReconnect: false,
+        destroyPlayer: true,
       },
       maxHistoryPerGuild: 50,
     },
