@@ -24,9 +24,9 @@ lavalink:
       rotation: true
       channelMix: true
       lowPass: true
-    bufferDurationMs: 2000
-    frameBufferDurationMs: 15000
-    opusEncodingQuality: 10
+    bufferDurationMs: 1500
+    frameBufferDurationMs: 30000
+    opusEncodingQuality: 5
     resamplingQuality: HIGH
     trackStuckThresholdMs: 10000
     useSeekGhosting: true
@@ -58,8 +58,8 @@ plugins:
       deezer: false
       yandexmusic: false
     spotify:
-      clientId: "3f69ce8c2b2545e292ba92d53d3a3604"
-      clientSecret: "916c81b61e9f411fb7d9d5199c56a8f5"
+      clientId: "${SPOTIFY_CLIENT_ID}"
+      clientSecret: "${SPOTIFY_CLIENT_SECRET}"
       countryCode: "PE"
       playlistLoadLimit: 200
       albumLoadLimit: 100
