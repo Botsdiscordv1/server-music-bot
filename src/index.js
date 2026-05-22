@@ -131,6 +131,17 @@ async function main() {
   await initDB();
   const client = createClient();
   await client.login(process.env.DISCORD_TOKEN);
+
+  // Keep TTS service warm to avoid Render cold starts
+  const ttsProvider = (process.env.TTS_PROVIDER || "google").toLowerCase();
+  if (ttsProvider === "edge" || ttsProvider === "kokoro") {
+    const edgeApiUrl = process.env.EDGE_API_URL || process.env.KOKORO_API_URL;
+    if (edgeApiUrl) {
+      const warmUrl = `${edgeApiUrl.replace(/\/+$/, "")}/tts.mp3?text=keep+warm&voice=${process.env.EDGE_VOICE || "es-MX-DaliaNeural"}&lang=${process.env.EDGE_LANG || "es"}`;
+      setInterval(() => { fetch(warmUrl).catch(() => {}); }, 4 * 60 * 1000);
+      console.log("[TTS] Keepalive iniciado cada 4 minutos para evitar cold starts en Render");
+    }
+  }
 }
 
 main().catch(console.error);

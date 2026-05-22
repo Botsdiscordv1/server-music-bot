@@ -202,6 +202,9 @@ async function queueTTS(player, text) {
     const url = getTTSUrl(text);
     console.log(`[TTS] Intentando cargar audio desde: ${url}`);
     
+    // Pre-warm TTS service (mitiga cold start de Render)
+    fetch(url, { signal: AbortSignal.timeout(5000) }).catch(() => {});
+    
     const startTime = Date.now();
     const result = await player.search({ query: url }, { username: "DJ", id: "dj" });
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
