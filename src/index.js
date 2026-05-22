@@ -20,6 +20,7 @@ const { WebSocket } = require("ws");
 const { createClient } = require("./client");
 const { initDB } = require("./database");
 const { getGoogleTTSUrl } = require("./utils/ttsService");
+const { app: musicApi, startApi } = require("./api/server");
 
 function testWS(url, headers) {
   return new Promise((resolve) => {
@@ -38,10 +39,18 @@ function testWS(url, headers) {
 }
 
 const PORT = Number(process.env.PORT) || 3000;
+const API_PORT = Number(process.env.API_PORT) || 3001;
 const server = http.createServer((req, res) => {
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const pathname = urlObj.pathname;
 
-  if (urlObj.pathname === "/api/tts") {
+  // Music API (Express) en el mismo puerto — necesario para Render
+  if (pathname.startsWith("/api") && !(pathname === "/api/tts" && req.method === "GET")) {
+    musicApi(req, res);
+    return;
+  }
+
+  if (pathname === "/api/tts") {
     const text = urlObj.searchParams.get("text");
     if (!text) {
       res.writeHead(400, { "Content-Type": "text/plain" });
@@ -61,44 +70,28 @@ const server = http.createServer((req, res) => {
 
     const voice = urlObj.searchParams.get("voice") || process.env.KOKORO_VOICE || "ef_dora";
     
-    // Call Kokoro API
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 seconds timeout
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     const apiUrl = kokoroApiUrl.endsWith("/") ? kokoroApiUrl.slice(0, -1) : kokoroApiUrl;
     const targetUrl = `${apiUrl}/v1/audio/speech`;
 
     fetch(targetUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "kokoro",
-        input: text,
-        voice: voice,
-        // kokoro-onnx returns WAV natively (no ffmpeg needed)
-        response_format: "wav",
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "kokoro", input: text, voice, response_format: "wav" }),
       signal: controller.signal,
     })
     .then((response) => {
       clearTimeout(timeoutId);
-      if (!response.ok) {
-        throw new Error(`Kokoro returned status ${response.status}`);
-      }
-
-      res.writeHead(200, {
-        "Content-Type": "audio/wav",
-        "Cache-Control": "public, max-age=31536000",
-      });
-
+      if (!response.ok) throw new Error(`Kokoro returned status ${response.status}`);
+      res.writeHead(200, { "Content-Type": "audio/wav", "Cache-Control": "public, max-age=31536000" });
       const { Readable } = require("stream");
       Readable.fromWeb(response.body).pipe(res);
     })
     .catch((err) => {
       clearTimeout(timeoutId);
-      console.error(`[Proxy TTS] Kokoro API failed or timed out (${err.message}). Redirecting to Google TTS.`);
+      console.error(`[Proxy TTS] Kokoro API failed (${err.message}). Redirecting to Google TTS.`);
       res.writeHead(302, { Location: fallbackUrl });
       res.end();
     });
@@ -129,10 +122,14 @@ server.listen(PORT, () => console.log(`[HTTP] Health check on port ${PORT}`));
 
 async function main() {
   await initDB();
+  if (process.env.RENDER) {
+    console.log(`[API] Music API mounted on port ${PORT} (Render)`);
+  } else {
+    await startApi(API_PORT);
+  }
   const client = createClient();
   await client.login(process.env.DISCORD_TOKEN);
 
-  // Keep TTS service warm to avoid Render cold starts
   const ttsProvider = (process.env.TTS_PROVIDER || "google").toLowerCase();
   if (ttsProvider === "edge" || ttsProvider === "kokoro") {
     const edgeApiUrl = process.env.EDGE_API_URL || process.env.KOKORO_API_URL;
