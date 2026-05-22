@@ -26,36 +26,39 @@ module.exports = {
     for (const [, player] of client.lavalink.players) {
       if (player.node.id !== node.id) continue;
       
-      if (player.voiceChannelId) {
-        console.log(`[Lavalink Reconnect] Re-establishing voice connection for guild: ${player.guildId}`);
-        player.connect().catch((err) => console.error(`[Lavalink Reconnect] connect() failed:`, err.message));
+      if (!player.voiceChannelId) continue;
 
-        // Wait 1.5s to allow Discord voice server update handshake to complete before playing
-        setTimeout(() => {
+      console.log(`[Lavalink Reconnect] Re-establishing voice connection for guild: ${player.guildId}`);
+      try {
+        await player.connect();
+      } catch (err) {
+        console.error(`[Lavalink Reconnect] connect() failed:`, err.message);
+        continue;
+      }
+
+      setTimeout(async () => {
+        try {
           if (player.queue.current) {
-            const currentPos = player.position || 0;
-            console.log(`[Lavalink Reconnect] Restoring track playback for "${player.queue.current.info.title}" at ${currentPos}ms`);
-            player.play({
-              startTime: currentPos,
-              paused: player.paused
-            }).catch((err) => console.error(`[Lavalink Reconnect] Failed to resume track:`, err.message));
-          } else {
-            if (player.queue.previous?.length > 0) {
-              const last = player.queue.previous[player.queue.previous.length - 1];
-              player.queue.add(last);
-              player.play({ paused: false }).catch(() => {});
-            } else if (player._autoplayEnabled) {
-              const { getAutoplayTrack } = require("../../services/autoplay");
-              getAutoplayTrack(player, player.queue.previous?.[0] || { info: {} }).then((result) => {
-                if (result) {
-                  player.queue.add(result.track);
-                  player.play({ paused: false }).catch(() => {});
-                }
-              }).catch(() => {});
+            console.log(`[Lavalink Reconnect] Restoring "${player.queue.current.info.title}"`);
+            await player.play({ paused: player.paused });
+          } else if (player.queue.tracks.length) {
+            await player.play({ paused: false });
+          } else if (player.queue.previous?.length > 0) {
+            const last = player.queue.previous[player.queue.previous.length - 1];
+            player.queue.add(last);
+            await player.play({ paused: false });
+          } else if (player._autoplayEnabled) {
+            const { getAutoplayTrack } = require("../../services/autoplay");
+            const result = await getAutoplayTrack(player, player.queue.previous?.[0] || { info: {} });
+            if (result) {
+              player.queue.add(result.track);
+              await player.play({ paused: false });
             }
           }
-        }, 1000);
-      }
+        } catch (err) {
+          console.error(`[Lavalink Reconnect] Failed to resume in ${player.guildId}:`, err.message);
+        }
+      }, 2000);
     }
   },
 };
