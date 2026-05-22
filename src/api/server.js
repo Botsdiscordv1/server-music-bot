@@ -47,25 +47,27 @@ app.get("/api/search", requireApiKey, async (req, res) => {
   }
 });
 
-// src/api/server.js - Actualizado con extracción de alta fidelidad
+
+// ENDPOINT ÚNICO Y OPTIMIZADO
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: "Missing 'id' parameter" });
 
-    // play.stream es mucho más robusto que video_info manual
-    const stream = await play.stream(id, { 
-      quality: 2, // Calidad de audio premium
-      seek: 0 
+    // play.stream es el método más robusto para saltar bloqueos
+    const stream = await play.stream(id, {
+      quality: 2, // Máxima calidad de audio
+      seek: 0
     });
 
     if (!stream || !stream.url) {
-      return res.status(404).json({ error: "No se encontró un flujo de audio válido" });
+      return res.status(404).json({ error: "No audio stream found" });
     }
 
+    // Enviamos la URL directa a la App
     res.json({ url: stream.url });
   } catch (err) {
-    console.error("Error crítico en stream:", err.message);
+    console.error("Stream Error:", err.message);
     res.status(500).json({ error: "Error en el servidor de streaming" });
   }
 });
