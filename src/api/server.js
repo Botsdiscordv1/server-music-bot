@@ -53,7 +53,8 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     if (!id) return res.status(400).json({ error: "Missing 'id' parameter" });
 
     const info = await play.video_info(id);
-    const stream = info.formats
+    // Use .format instead of .formats
+    const stream = info.format
       .filter(f => f.hasAudio && !f.hasVideo)
       .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
 
