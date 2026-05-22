@@ -24,7 +24,7 @@ lavalink:
       rotation: true
       channelMix: true
       lowPass: true
-    bufferDurationMs: 1000
+    bufferDurationMs: 2000
     frameBufferDurationMs: 10000
     opusEncodingQuality: 10
     resamplingQuality: HIGH
