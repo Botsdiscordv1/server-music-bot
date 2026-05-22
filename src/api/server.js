@@ -53,14 +53,17 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     if (!id) return res.status(400).json({ error: "Missing 'id' parameter" });
 
     const info = await play.video_info(id);
-    // Use .format instead of .formats
-    const stream = info.format
+
+    // CORREGIDO: Es .formats (con s)
+    const stream = info.formats
       .filter(f => f.hasAudio && !f.hasVideo)
       .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
 
     if (!stream) return res.status(404).json({ error: "No audio stream found" });
+
     res.json({ url: stream.url });
   } catch (err) {
+    console.error("Stream Error:", err);
     res.status(500).json({ error: err.message });
   }
 });
