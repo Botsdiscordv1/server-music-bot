@@ -26,14 +26,12 @@ module.exports = {
     for (const [, player] of client.lavalink.players) {
       if (player.node.id !== node.id) continue;
       
-      if (player.voiceChannelId && !player.connected) {
+      if (player.voiceChannelId) {
         console.log(`[Lavalink Reconnect] Re-establishing voice connection for guild: ${player.guildId}`);
         player.connect().catch((err) => console.error(`[Lavalink Reconnect] connect() failed:`, err.message));
 
-        // Wait 1 second to allow Discord voice server update handshake to complete before playing
+        // Wait 1.5s to allow Discord voice server update handshake to complete before playing
         setTimeout(() => {
-          if (player.playing) return; // already resumed by autoReconnect
-          
           if (player.queue.current) {
             const currentPos = player.position || 0;
             console.log(`[Lavalink Reconnect] Restoring track playback for "${player.queue.current.info.title}" at ${currentPos}ms`);

@@ -42,7 +42,7 @@ function createClient() {
       volumeDecrementer: 0.75,
       onDisconnect: {
         destroyPlayer: false,
-        autoReconnect: true,
+        autoReconnect: false,
       },
       maxHistoryPerGuild: 50,
     },
