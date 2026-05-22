@@ -52,10 +52,21 @@ app.get("/api/search", requireApiKey, async (req, res) => {
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
     const { id } = req.query;
-    if (!id) return res.status(400).json({ error: "Missing 'id' parameter" });
+    if (!id || id === "undefined" || id === "null" || id.trim() === "") {
+      return res.status(400).json({ error: "Missing or invalid 'id' parameter" });
+    }
+
+    console.log("[API/stream] Request ID:", id);
+
+    // Si no es una URL completa (http/https), asumimos que es el ID de un video de YouTube y la construimos
+    const url = (id.startsWith("http://") || id.startsWith("https://"))
+      ? id
+      : `https://www.youtube.com/watch?v=${id}`;
+
+    console.log("[API/stream] Resolviendo stream para:", url);
 
     // play.stream es el método más robusto para saltar bloqueos
-    const stream = await play.stream(id, {
+    const stream = await play.stream(url, {
       quality: 2, // Máxima calidad de audio
       seek: 0
     });
