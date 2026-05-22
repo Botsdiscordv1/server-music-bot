@@ -36,29 +36,38 @@ module.exports = {
         continue;
       }
 
-      setTimeout(async () => {
-        try {
-          if (player.queue.current) {
-            console.log(`[Lavalink Reconnect] Restoring "${player.queue.current.info.title}"`);
-            await player.play({ paused: player.paused });
-          } else if (player.queue.tracks.length) {
+      // Esperar hasta 10s a que Lavalink confirme la conexión de voz
+      let waited = 0;
+      while (!player.connected && waited < 10000) {
+        await new Promise(r => setTimeout(r, 500));
+        waited += 500;
+      }
+      if (!player.connected) {
+        console.error(`[Lavalink Reconnect] Voice connection timeout for guild: ${player.guildId}`);
+        continue;
+      }
+
+      try {
+        if (player.queue.current) {
+          console.log(`[Lavalink Reconnect] Restoring "${player.queue.current.info.title}"`);
+          await player.play({ paused: player.paused });
+        } else if (player.queue.tracks.length) {
+          await player.play({ paused: false });
+        } else if (player.queue.previous?.length > 0) {
+          const last = player.queue.previous[player.queue.previous.length - 1];
+          player.queue.add(last);
+          await player.play({ paused: false });
+        } else if (player._autoplayEnabled) {
+          const { getAutoplayTrack } = require("../../services/autoplay");
+          const result = await getAutoplayTrack(player, player.queue.previous?.[0] || { info: {} });
+          if (result) {
+            player.queue.add(result.track);
             await player.play({ paused: false });
-          } else if (player.queue.previous?.length > 0) {
-            const last = player.queue.previous[player.queue.previous.length - 1];
-            player.queue.add(last);
-            await player.play({ paused: false });
-          } else if (player._autoplayEnabled) {
-            const { getAutoplayTrack } = require("../../services/autoplay");
-            const result = await getAutoplayTrack(player, player.queue.previous?.[0] || { info: {} });
-            if (result) {
-              player.queue.add(result.track);
-              await player.play({ paused: false });
-            }
           }
-        } catch (err) {
-          console.error(`[Lavalink Reconnect] Failed to resume in ${player.guildId}:`, err.message);
         }
-      }, 2000);
+      } catch (err) {
+        console.error(`[Lavalink Reconnect] Failed to resume in ${player.guildId}:`, err.message);
+      }
     }
   },
 };
