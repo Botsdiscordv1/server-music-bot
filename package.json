@@ -17,6 +17,7 @@
     "express": "^5.2.1",
     "lavalink-client": "^2.4.0",
     "mongoose": "^9.6.2",
+    "play-dl": "^1.9.7",
     "sql.js": "^1.11.0"
   },
   "engines": {

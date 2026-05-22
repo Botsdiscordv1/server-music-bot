@@ -4,6 +4,7 @@ const db = require("../database");
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
 const axios = require("axios");
+const play = require("play-dl");
 
 const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
 const LAVALINK_PORT = Number(process.env.LAVALINK_PORT) || 2333;
@@ -41,6 +42,23 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     }));
 
     res.json({ query: q, source, tracks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/stream", requireApiKey, async (req, res) => {
+  try {
+    const { id } = req.query;
+    if (!id) return res.status(400).json({ error: "Missing 'id' parameter" });
+
+    const info = await play.video_info(id);
+    const stream = info.formats
+      .filter(f => f.hasAudio && !f.hasVideo)
+      .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
+
+    if (!stream) return res.status(404).json({ error: "No audio stream found" });
+    res.json({ url: stream.url });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
