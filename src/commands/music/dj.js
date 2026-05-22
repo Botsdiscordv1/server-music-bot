@@ -294,6 +294,8 @@ async function refillQueue(player, client) {
 
     // If queue was empty, resume playback
     if (!player.playing && !player.paused && batch.length > 0) {
+      // Delay 1s para drenar el buffer NAS antes de arrancar la intro TTS
+      await new Promise(r => setTimeout(r, 1000));
       await player.play({ paused: false }).catch(() => {});
       player._trackStartTime = Date.now();
     }
