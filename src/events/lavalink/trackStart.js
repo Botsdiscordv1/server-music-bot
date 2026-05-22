@@ -17,6 +17,9 @@ module.exports = {
     player._lastTrackStartUri = trackUri;
     player._lastTrackStartTime = now;
 
+    // Silenciar el reproductor visual para TTS/DJ intros
+    if (track?._djIntro) return;
+
     player._lyricsAvailable = false;
     player._lsyncAvailable = false;
 
