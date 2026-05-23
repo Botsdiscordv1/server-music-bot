@@ -334,10 +334,42 @@ app.get("/api/artist-image", requireApiKey, async (req, res) => {
   try {
     const name = req.query.name;
     if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
-    const url = await spotify.getArtistImage(name);
-    res.json({ url });
+
+    // Try Spotify first (handles errors internally, returns null on failure)
+    const spotifyUrl = await spotify.getArtistImage(name);
+    if (spotifyUrl) {
+      console.log(`[ArtistImage] Spotify: "${name}" → ${spotifyUrl}`);
+      return res.json({ url: spotifyUrl });
+    }
+
+    // Fallback: search YouTube Music via Lavalink for artist track thumbnail
+    console.log(`[ArtistImage] YouTube fallback for "${name}"`);
+    const searchUrl = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(`ytmsearch:${name}`)}`;
+    const response = await axios.get(searchUrl, {
+      headers: { Authorization: LAVALINK_AUTH },
+      timeout: 10000,
+    });
+
+    const tracks = response.data?.data || [];
+    const firstTrack = tracks[0]?.info;
+    if (firstTrack?.artworkUrl) {
+      console.log(`[ArtistImage] YouTube thumbnail: "${name}" → ${firstTrack.artworkUrl}`);
+      return res.json({ url: firstTrack.artworkUrl });
+    }
+
+    // Last resort: construct from video ID
+    const videoId = firstTrack?.uri?.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+    if (videoId) {
+      const url = `https://i.ytimg.com/vi/${videoId}/default.jpg`;
+      console.log(`[ArtistImage] Constructed: "${name}" → ${url}`);
+      return res.json({ url });
+    }
+
+    console.log(`[ArtistImage] No image found for "${name}"`);
+    res.json({ url: null });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(`[ArtistImage] Error for "${name}":`, err.message);
+    res.json({ url: null });
   }
 });
 
