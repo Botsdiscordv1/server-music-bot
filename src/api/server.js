@@ -110,9 +110,13 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     }
 
     const info = await play.video_info(url);
-    const stream = await play.stream_from_info(info, { quality: 2 });
+    const stream = await play.stream_from_info(info, {
+      quality: 2,
+      discordPlayerCompatibility: true
+    });
     if (stream?.url) {
       streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+      console.log("[API/stream] play-dl success:", cacheKey);
       return res.json({ url: stream.url });
     }
 
