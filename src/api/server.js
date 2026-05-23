@@ -93,10 +93,13 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.json({ url: cached.url });
     }
 
-    const url = (id.startsWith("http://") || id.startsWith("https://"))
-      ? id
-      : `https://www.youtube.com/watch?v=${id}`;
+    // Convertir ID a URL de YouTube
+    let url = id;
+    if (!id.startsWith("http")) {
+      url = `https://www.youtube.com/watch?v=${id}`;
+    }
 
+    // Intentar yt-dlp si está disponible (fue removido pero lo dejamos por si se reinstala)
     if (resolveWithYtDlp) {
       try {
         const streamUrl = await resolveWithYtDlp(url);
@@ -104,26 +107,37 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
           streamCache.set(cacheKey, { url: streamUrl, ts: Date.now() });
           return res.json({ url: streamUrl });
         }
-      } catch (ytErr) {
-        console.warn("[API/stream] yt-dlp failed:", ytErr.message);
+      } catch (e) {}
+    }
+
+    // Fallback a play-dl (Principal)
+    try {
+      // Optimización: Si es un ID de 11 chars, forzar búsqueda o info directa
+      const info = await play.video_info(url).catch(async () => {
+         // Si video_info falla (ej: video privado/borrado), intentamos buscarlo por título si el App enviara más info,
+         // pero aquí solo tenemos el ID. Intentamos una vez más con play.search
+         const search = await play.search(id, { limit: 1 });
+         return search[0] ? await play.video_info(search[0].url) : null;
+      });
+
+      if (info) {
+        const stream = await play.stream_from_info(info, {
+          quality: 2,
+          discordPlayerCompatibility: true
+        });
+        if (stream?.url) {
+          streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+          return res.json({ url: stream.url });
+        }
       }
+    } catch (pdErr) {
+      console.error(`[play-dl] Error for ${id}:`, pdErr.message);
     }
 
-    const info = await play.video_info(url);
-    const stream = await play.stream_from_info(info, {
-      quality: 2,
-      discordPlayerCompatibility: true
-    });
-    if (stream?.url) {
-      streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
-      console.log("[API/stream] play-dl success:", cacheKey);
-      return res.json({ url: stream.url });
-    }
-
-    return res.status(404).json({ error: "No audio stream found" });
+    res.status(404).json({ error: "No stream found after fallback" });
   } catch (err) {
-    console.error("Stream Error:", err.message);
-    res.status(500).json({ error: "Error en el servidor de streaming" });
+    console.error("Critical Stream Error:", err.stack);
+    res.status(500).json({ error: "Server Internal Error" });
   }
 });
 
