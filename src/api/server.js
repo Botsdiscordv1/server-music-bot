@@ -217,4 +217,47 @@ app.post("/api/playlists/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+app.get("/api/artists/:userId", requireApiKey, async (req, res) => {
+  try {
+    const artists = await db.getLikedArtists(req.params.userId);
+    res.json({ artists });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/artist-image", requireApiKey, async (req, res) => {
+  try {
+    const name = req.query.name;
+    if (!name) return res.status(400).json({ error: "Missing 'name'" });
+    const deezerRes = await axios.get(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=1`);
+    const url = deezerRes.data?.data?.[0]?.picture_medium || null;
+    res.json({ url });
+  } catch (err) {
+    res.json({ url: null });
+  }
+});
+
+app.get("/api/recommendations/:userId", requireApiKey, async (req, res) => {
+  try {
+    const liked = await db.getLikedSongs(req.params.userId, 5);
+    if (!liked.length) return res.json({ tracks: [] });
+    const spotifyTracks = await spotify.searchTracks(`${liked[0].track_title} ${liked[0].track_author}`, 5);
+    const seedIds = spotifyTracks.map(t => t.id).filter(Boolean).slice(0, 5);
+    const recs = seedIds.length ? await spotify.getRecommendations(seedIds) : [];
+    res.json({ tracks: recs });
+  } catch (err) {
+    res.json({ tracks: [] });
+  }
+});
+
+app.get("/api/top-tracks/:userId", requireApiKey, async (req, res) => {
+  try {
+    const tracks = await db.getMostPlayedTracks(req.params.userId, parseInt(req.query.limit) || 10);
+    res.json({ tracks });
+  } catch (err) {
+    res.json({ tracks: [] });
+  }
+});
+
 module.exports = { app };
