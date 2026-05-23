@@ -263,16 +263,49 @@ async function searchArtists(query, limit = 3) {
 }
 
 /**
+ * Clean artist name for Spotify search.
+ * Takes the primary artist from compound names like "A, B", "A feat. B", "A & B"
+ */
+function cleanArtistName(name) {
+  return name
+    .split(/[,;&/]|feat\.|ft\.|Feat\.|Ft\./)[0]
+    .replace(/\(.*?\)/g, "")
+    .replace(/\[.*?\]/g, "")
+    .trim();
+}
+
+/**
  * Search for a single artist and return their profile image URL.
  * @param {string} name
  * @returns {string|null}
  */
 async function getArtistImage(name) {
-  const artists = await searchArtists(name, 1);
-  if (artists.length === 0) return null;
-  // Fuzzy-ish match: prefer exact name match, else return first result
-  const match = artists.find((a) => a.name.toLowerCase() === name.toLowerCase()) || artists[0];
-  return match.image || null;
+  const cleanName = cleanArtistName(name);
+  console.log(`[ArtistImage] Searching for "${name}" → clean: "${cleanName}"`);
+
+  if (!cleanName) {
+    console.log(`[ArtistImage] Empty name after cleaning for "${name}"`);
+    return null;
+  }
+
+  try {
+    const artists = await searchArtists(cleanName, 3);
+    if (artists.length === 0) {
+      console.log(`[ArtistImage] No results for "${cleanName}"`);
+      return null;
+    }
+
+    // Prefer exact match, then first result
+    const match = artists.find(
+      (a) => a.name.toLowerCase() === cleanName.toLowerCase()
+    ) || artists[0];
+
+    console.log(`[ArtistImage] Match: "${match.name}" → ${match.image || "no image"}`);
+    return match.image || null;
+  } catch (err) {
+    console.error(`[ArtistImage] Error for "${cleanName}":`, err.message);
+    return null;
+  }
 }
 
 module.exports = {
