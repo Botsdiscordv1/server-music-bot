@@ -6,6 +6,9 @@ const spotify = require("../services/spotify");
 const axios = require("axios");
 const play = require("play-dl");
 
+const streamCache = new Map();
+const STREAM_CACHE_TTL = 30 * 60 * 1000; // 30 min
+
 const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
 const LAVALINK_PORT = Number(process.env.LAVALINK_PORT) || 2333;
 const LAVALINK_SECURE = process.env.LAVALINK_SECURE === "true";
@@ -56,18 +59,23 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid 'id' parameter" });
     }
 
+    const cacheKey = id.trim();
+    const cached = streamCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < STREAM_CACHE_TTL) {
+      console.log("[API/stream] Cache hit:", cacheKey);
+      return res.json({ url: cached.url });
+    }
+
     console.log("[API/stream] Request ID:", id);
 
-    // Si no es una URL completa (http/https), asumimos que es el ID de un video de YouTube y la construimos
     const url = (id.startsWith("http://") || id.startsWith("https://"))
       ? id
       : `https://www.youtube.com/watch?v=${id}`;
 
     console.log("[API/stream] Resolviendo stream para:", url);
 
-    // play.stream es el método más robusto para saltar bloqueos
     const stream = await play.stream(url, {
-      quality: 2, // Máxima calidad de audio
+      quality: 2,
       seek: 0
     });
 
@@ -75,7 +83,9 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.status(404).json({ error: "No audio stream found" });
     }
 
-    // Enviamos la URL directa a la App
+    streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+    console.log("[API/stream] Cached:", cacheKey);
+
     res.json({ url: stream.url });
   } catch (err) {
     console.error("Stream Error:", err.message);
