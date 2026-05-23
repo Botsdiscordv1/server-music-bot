@@ -50,19 +50,36 @@ app.get("/api/prewarm", requireApiKey, async (req, res) => {
     return res.json({ url: cached.url });
   }
 
-  if (!resolveWithYtDlp) return res.json({ url: null });
-
   try {
-    const searchUrl = `ytsearch1:${q}`;
-    const result = await require("@distube/yt-dlp").raw(searchUrl, {
-      format: "bestaudio",
-      noWarnings: true,
-      getUrl: true,
-    });
-    const url = result.stdout.toString().trim();
-    if (url) streamCache.set(cacheKey, { url, ts: Date.now() });
-    res.json({ url });
-  } catch {
+    // 1. Try lightweight play-dl search and stream resolution (0 child processes)
+    const searchResults = await play.search(q, { limit: 1 });
+    if (searchResults.length > 0) {
+      const info = await play.video_info(searchResults[0].url);
+      const stream = await play.stream_from_info(info, { quality: 2 });
+      if (stream?.url) {
+        streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+        return res.json({ url: stream.url });
+      }
+    }
+
+    // 2. Fallback to yt-dlp only if play-dl fails and yt-dlp is available
+    if (resolveWithYtDlp) {
+      const searchUrl = `ytsearch1:${q}`;
+      const result = await require("@distube/yt-dlp").raw(searchUrl, {
+        format: "bestaudio",
+        noWarnings: true,
+        getUrl: true,
+      });
+      const url = result.stdout.toString().trim();
+      if (url) {
+        streamCache.set(cacheKey, { url, ts: Date.now() });
+        return res.json({ url });
+      }
+    }
+
+    res.json({ url: null });
+  } catch (err) {
+    console.warn("[API/prewarm] Prewarm failed:", err.message);
     res.json({ url: null });
   }
 });
@@ -91,15 +108,19 @@ app.get("/api/search", requireApiKey, async (req, res) => {
 
     res.json({ query: q, source, tracks });
 
-    // Background pre-resolve top 3 tracks
-    if (resolveWithYtDlp) {
-      for (const track of tracks.slice(0, 3)) {
-        const cacheKey = track.uri?.match(/v=([^&]+)/)?.[1] || "";
-        if (cacheKey && !streamCache.has(cacheKey)) {
-          resolveWithYtDlp(track.uri).then(url => {
-            if (url) streamCache.set(cacheKey, { url, ts: Date.now() });
-          }).catch(() => {});
-        }
+    // Background pre-resolve top track using play-dl (extremely lightweight, 0 child processes)
+    if (tracks.length > 0) {
+      const topTrack = tracks[0];
+      const cacheKey = topTrack.uri?.match(/v=([^&]+)/)?.[1] || "";
+      if (cacheKey && !streamCache.has(cacheKey)) {
+        play.video_info(topTrack.uri).then(info => {
+          return play.stream_from_info(info, { quality: 2 });
+        }).then(stream => {
+          if (stream?.url) {
+            streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+            console.log("[API/search] Lightweight play-dl pre-resolved top track:", cacheKey);
+          }
+        }).catch(() => {});
       }
     }
   } catch (err) {
