@@ -242,8 +242,43 @@ async function getTrackOembed(url) {
   };
 }
 
+/**
+ * Search for artists on Spotify.
+ * @param {string} query
+ * @param {number} limit
+ * @returns {Array<{ id: string, name: string, image: string, genres: string[] }>}
+ */
+async function searchArtists(query, limit = 3) {
+  const token = await getAccessToken();
+  const res = await api.get("https://api.spotify.com/v1/search", {
+    headers: { Authorization: `Bearer ${token}` },
+    params: { q: query, type: "artist", limit },
+  });
+  return (res.data.artists?.items || []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    image: a.images?.[0]?.url || null,
+    genres: a.genres || [],
+  }));
+}
+
+/**
+ * Search for a single artist and return their profile image URL.
+ * @param {string} name
+ * @returns {string|null}
+ */
+async function getArtistImage(name) {
+  const artists = await searchArtists(name, 1);
+  if (artists.length === 0) return null;
+  // Fuzzy-ish match: prefer exact name match, else return first result
+  const match = artists.find((a) => a.name.toLowerCase() === name.toLowerCase()) || artists[0];
+  return match.image || null;
+}
+
 module.exports = {
   searchTracks,
+  searchArtists,
+  getArtistImage,
   getTrack,
   getPlaylist,
   getRecommendations,

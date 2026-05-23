@@ -6,6 +6,23 @@ const spotify = require("../services/spotify");
 const axios = require("axios");
 const play = require("play-dl");
 
+let resolveWithYtDlp;
+try {
+  const ytDlp = require("@distube/yt-dlp");
+  resolveWithYtDlp = async (videoUrl) => {
+    const result = await ytDlp.raw(videoUrl, {
+      format: "bestaudio",
+      noWarnings: true,
+      getUrl: true,
+    });
+    return result.stdout.toString().trim();
+  };
+  console.log("[API/stream] yt-dlp loaded");
+} catch {
+  resolveWithYtDlp = null;
+  console.warn("[API/stream] yt-dlp not available, using play-dl only");
+}
+
 const streamCache = new Map();
 const STREAM_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
@@ -20,6 +37,34 @@ app.use(express.json());
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", service: "music-api" });
+});
+
+// Pre-resuelve un query de búsqueda antes de que el usuario toque
+app.get("/api/prewarm", requireApiKey, async (req, res) => {
+  const q = req.query.q;
+  if (!q || q.length < 3) return res.json({ url: null });
+
+  const cacheKey = "prewarm:" + q;
+  const cached = streamCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < STREAM_CACHE_TTL) {
+    return res.json({ url: cached.url });
+  }
+
+  if (!resolveWithYtDlp) return res.json({ url: null });
+
+  try {
+    const searchUrl = `ytsearch1:${q}`;
+    const result = await require("@distube/yt-dlp").raw(searchUrl, {
+      format: "bestaudio",
+      noWarnings: true,
+      getUrl: true,
+    });
+    const url = result.stdout.toString().trim();
+    if (url) streamCache.set(cacheKey, { url, ts: Date.now() });
+    res.json({ url });
+  } catch {
+    res.json({ url: null });
+  }
 });
 
 app.get("/api/search", requireApiKey, async (req, res) => {
@@ -45,6 +90,18 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     }));
 
     res.json({ query: q, source, tracks });
+
+    // Background pre-resolve top 3 tracks
+    if (resolveWithYtDlp) {
+      for (const track of tracks.slice(0, 3)) {
+        const cacheKey = track.uri?.match(/v=([^&]+)/)?.[1] || "";
+        if (cacheKey && !streamCache.has(cacheKey)) {
+          resolveWithYtDlp(track.uri).then(url => {
+            if (url) streamCache.set(cacheKey, { url, ts: Date.now() });
+          }).catch(() => {});
+        }
+      }
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -74,19 +131,46 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
 
     console.log("[API/stream] Resolviendo stream para:", url);
 
-    const stream = await play.stream(url, {
-      quality: 2,
-      seek: 0
-    });
-
-    if (!stream || !stream.url) {
-      return res.status(404).json({ error: "No audio stream found" });
+    // 1. Try yt-dlp (fast, ~1-3s)
+    if (resolveWithYtDlp) {
+      try {
+        const streamUrl = await resolveWithYtDlp(url);
+        if (streamUrl) {
+          streamCache.set(cacheKey, { url: streamUrl, ts: Date.now() });
+          console.log("[API/stream] yt-dlp success:", cacheKey);
+          return res.json({ url: streamUrl });
+        }
+      } catch (ytErr) {
+        console.warn("[API/stream] yt-dlp failed:", ytErr.message);
+      }
     }
 
-    streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
-    console.log("[API/stream] Cached:", cacheKey);
+    // 2. Fallback to play-dl
+    console.log("[API/stream] Fallback to play-dl");
+    try {
+      const info = await play.video_info(url);
+      const stream = await play.stream_from_info(info, { quality: 2 });
+      if (stream?.url) {
+        streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+        console.log("[API/stream] play-dl cached:", cacheKey);
+        return res.json({ url: stream.url });
+      }
+    } catch (pdErr) {
+      console.warn("[API/stream] play-dl failed:", pdErr.message);
+    }
 
-    res.json({ url: stream.url });
+    // 3. Last resort: try play-dl with soundcloud quality fallback
+    try {
+      const stream = await play.stream(url, { quality: 1, seek: 0 });
+      if (stream?.url) {
+        streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+        return res.json({ url: stream.url });
+      }
+    } catch (pdErr2) {
+      console.warn("[API/stream] play-dl last resort failed:", pdErr2.message);
+    }
+
+    return res.status(404).json({ error: "No audio stream found" });
   } catch (err) {
     console.error("Stream Error:", err.message);
     res.status(500).json({ error: "Error en el servidor de streaming" });
@@ -241,6 +325,17 @@ app.get("/api/spotify/search", requireApiKey, async (req, res) => {
     const limit = parseInt(req.query.limit) || 5;
     const tracks = await spotify.searchTracks(q, limit);
     res.json({ tracks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/artist-image", requireApiKey, async (req, res) => {
+  try {
+    const name = req.query.name;
+    if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
+    const url = await spotify.getArtistImage(name);
+    res.json({ url });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
