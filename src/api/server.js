@@ -335,34 +335,43 @@ app.get("/api/artist-image", requireApiKey, async (req, res) => {
     const name = req.query.name;
     if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
 
-    // Try Spotify first (handles errors internally, returns null on failure)
-    const spotifyUrl = await spotify.getArtistImage(name);
-    if (spotifyUrl) {
-      console.log(`[ArtistImage] Spotify: "${name}" → ${spotifyUrl}`);
-      return res.json({ url: spotifyUrl });
+    // --- Source 1: Deezer (free, no auth, best artist images) ---
+    try {
+      const deezerRes = await axios.get(
+        `https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=3`,
+        { timeout: 5000 }
+      );
+      const deezerArtist = deezerRes.data?.data?.find(
+        a => a.name?.toLowerCase() === name.toLowerCase()
+      ) || deezerRes.data?.data?.[0];
+      if (deezerArtist?.picture_medium) {
+        console.log(`[ArtistImage] Deezer: "${name}" → ${deezerArtist.name}`);
+        return res.json({ url: deezerArtist.picture_medium });
+      }
+    } catch (e) {
+      console.warn(`[ArtistImage] Deezer failed: ${e.message}`);
     }
 
-    // Fallback: search YouTube Music via Lavalink for artist track thumbnail
-    console.log(`[ArtistImage] YouTube fallback for "${name}"`);
-    const searchUrl = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(`ytmsearch:${name}`)}`;
-    const response = await axios.get(searchUrl, {
-      headers: { Authorization: LAVALINK_AUTH },
-      timeout: 10000,
-    });
-
-    const tracks = response.data?.data || [];
-    const firstTrack = tracks[0]?.info;
-    if (firstTrack?.artworkUrl) {
-      console.log(`[ArtistImage] YouTube thumbnail: "${name}" → ${firstTrack.artworkUrl}`);
-      return res.json({ url: firstTrack.artworkUrl });
-    }
-
-    // Last resort: construct from video ID
-    const videoId = firstTrack?.uri?.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
-    if (videoId) {
-      const url = `https://i.ytimg.com/vi/${videoId}/default.jpg`;
-      console.log(`[ArtistImage] Constructed: "${name}" → ${url}`);
-      return res.json({ url });
+    // --- Source 2: Lavalink YouTube Music (channel avatars) ---
+    try {
+      const searchUrl = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(`ytmsearch:${name}`)}`;
+      const ytRes = await axios.get(searchUrl, {
+        headers: { Authorization: LAVALINK_AUTH },
+        timeout: 10000,
+      });
+      const firstTrack = ytRes.data?.data?.[0]?.info;
+      if (firstTrack?.artworkUrl) {
+        console.log(`[ArtistImage] YouTube: "${name}" → ${firstTrack.artworkUrl}`);
+        return res.json({ url: firstTrack.artworkUrl });
+      }
+      const videoId = firstTrack?.uri?.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+      if (videoId) {
+        const url = `https://i.ytimg.com/vi/${videoId}/default.jpg`;
+        console.log(`[ArtistImage] Constructed: "${name}" → ${url}`);
+        return res.json({ url });
+      }
+    } catch (e) {
+      console.warn(`[ArtistImage] YouTube failed: ${e.message}`);
     }
 
     console.log(`[ArtistImage] No image found for "${name}"`);
