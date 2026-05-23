@@ -13,24 +13,34 @@ let tokenExpiry = 0;
 async function getAccessToken() {
   if (accessToken && Date.now() < tokenExpiry) return accessToken;
 
-  const credentials = Buffer.from(
-    `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
-  ).toString("base64");
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  
+  if (!clientId || !clientSecret) {
+    throw new Error("SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET not set");
+  }
 
-  const res = await accountsApi.post(
-    "https://accounts.spotify.com/api/token",
-    "grant_type=client_credentials",
-    {
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    }
-  );
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
-  accessToken = res.data.access_token;
-  tokenExpiry = Date.now() + res.data.expires_in * 1000 - 5000;
-  return accessToken;
+  try {
+    const res = await accountsApi.post(
+      "https://accounts.spotify.com/api/token",
+      "grant_type=client_credentials",
+      {
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    accessToken = res.data.access_token;
+    tokenExpiry = Date.now() + res.data.expires_in * 1000 - 5000;
+    return accessToken;
+  } catch (err) {
+    console.error(`[Spotify] Token error (${err.response?.status || "network"}): ${err.message}`);
+    throw err;
+  }
 }
 
 /**
@@ -250,16 +260,25 @@ async function getTrackOembed(url) {
  */
 async function searchArtists(query, limit = 3) {
   const token = await getAccessToken();
-  const res = await api.get("https://api.spotify.com/v1/search", {
-    headers: { Authorization: `Bearer ${token}` },
-    params: { q: query, type: "artist", limit },
-  });
-  return (res.data.artists?.items || []).map((a) => ({
-    id: a.id,
-    name: a.name,
-    image: a.images?.[0]?.url || null,
-    genres: a.genres || [],
-  }));
+  try {
+    const res = await api.get("https://api.spotify.com/v1/search", {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { q: query, type: "artist", limit },
+    });
+    return (res.data.artists?.items || []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      image: a.images?.[0]?.url || null,
+      genres: a.genres || [],
+    }));
+  } catch (err) {
+    // Invalidate cached token on auth errors so next call retries
+    if (err.response?.status === 401 || err.response?.status === 403) {
+      accessToken = null;
+      tokenExpiry = 0;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -276,6 +295,7 @@ function cleanArtistName(name) {
 
 /**
  * Search for a single artist and return their profile image URL.
+ * Falls back to track search if artist search fails (403, etc.).
  * @param {string} name
  * @returns {string|null}
  */
@@ -288,24 +308,35 @@ async function getArtistImage(name) {
     return null;
   }
 
+  // Try 1: Artist search
   try {
     const artists = await searchArtists(cleanName, 3);
-    if (artists.length === 0) {
-      console.log(`[ArtistImage] No results for "${cleanName}"`);
-      return null;
+    if (artists.length > 0) {
+      const match = artists.find(
+        (a) => a.name.toLowerCase() === cleanName.toLowerCase()
+      ) || artists[0];
+      if (match.image) {
+        console.log(`[ArtistImage] Artist match: "${match.name}" → ${match.image}`);
+        return match.image;
+      }
     }
-
-    // Prefer exact match, then first result
-    const match = artists.find(
-      (a) => a.name.toLowerCase() === cleanName.toLowerCase()
-    ) || artists[0];
-
-    console.log(`[ArtistImage] Match: "${match.name}" → ${match.image || "no image"}`);
-    return match.image || null;
   } catch (err) {
-    console.error(`[ArtistImage] Error for "${cleanName}":`, err.message);
-    return null;
+    console.warn(`[ArtistImage] Artist search failed (${err.response?.status || "?"}), trying track fallback...`);
   }
+
+  // Try 2: Track search fallback — use first track's album art as artist image
+  try {
+    const tracks = await searchTracks(cleanName, 1);
+    if (tracks.length > 0 && tracks[0].thumbnail) {
+      console.log(`[ArtistImage] Track fallback: "${tracks[0].artist}" → ${tracks[0].thumbnail}`);
+      return tracks[0].thumbnail;
+    }
+  } catch (err) {
+    console.warn(`[ArtistImage] Track fallback also failed: ${err.message}`);
+  }
+
+  console.log(`[ArtistImage] No image found for "${cleanName}"`);
+  return null;
 }
 
 module.exports = {
