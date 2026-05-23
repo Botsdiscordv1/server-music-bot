@@ -35,53 +35,20 @@ const LAVALINK_AUTH = process.env.LAVALINK_PASSWORD || "youshallnotpass";
 const app = express();
 app.use(express.json());
 
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", service: "music-api" });
+// Logger simple para debug en Render
+app.use((req, res, next) => {
+  console.log(`[${req.method}] ${req.url}`);
+  next();
 });
 
-// Pre-resuelve un query de búsqueda antes de que el usuario toque
-app.get("/api/prewarm", requireApiKey, async (req, res) => {
-  const q = req.query.q;
-  if (!q || q.length < 3) return res.json({ url: null });
+// Root Health Check (Para Render)
+app.get("/", (req, res) => {
+  res.send("Android Music Backend is running");
+});
 
-  const cacheKey = "prewarm:" + q;
-  const cached = streamCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < STREAM_CACHE_TTL) {
-    return res.json({ url: cached.url });
-  }
-
-  try {
-    // 1. Try lightweight play-dl search and stream resolution (0 child processes)
-    const searchResults = await play.search(q, { limit: 1 });
-    if (searchResults.length > 0) {
-      const info = await play.video_info(searchResults[0].url);
-      const stream = await play.stream_from_info(info, { quality: 2 });
-      if (stream?.url) {
-        streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
-        return res.json({ url: stream.url });
-      }
-    }
-
-    // 2. Fallback to yt-dlp only if play-dl fails and yt-dlp is available
-    if (resolveWithYtDlp) {
-      const searchUrl = `ytsearch1:${q}`;
-      const result = await require("@distube/yt-dlp").raw(searchUrl, {
-        format: "bestaudio",
-        noWarnings: true,
-        getUrl: true,
-      });
-      const url = result.stdout.toString().trim();
-      if (url) {
-        streamCache.set(cacheKey, { url, ts: Date.now() });
-        return res.json({ url });
-      }
-    }
-
-    res.json({ url: null });
-  } catch (err) {
-    console.warn("[API/prewarm] Prewarm failed:", err.message);
-    res.json({ url: null });
-  }
+// API Health Check (Para el App Android)
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", service: "music-api" });
 });
 
 app.get("/api/search", requireApiKey, async (req, res) => {
@@ -107,29 +74,12 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     }));
 
     res.json({ query: q, source, tracks });
-
-    // Background pre-resolve top track using play-dl (extremely lightweight, 0 child processes)
-    if (tracks.length > 0) {
-      const topTrack = tracks[0];
-      const cacheKey = topTrack.uri?.match(/v=([^&]+)/)?.[1] || "";
-      if (cacheKey && !streamCache.has(cacheKey)) {
-        play.video_info(topTrack.uri).then(info => {
-          return play.stream_from_info(info, { quality: 2 });
-        }).then(stream => {
-          if (stream?.url) {
-            streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
-            console.log("[API/search] Lightweight play-dl pre-resolved top track:", cacheKey);
-          }
-        }).catch(() => {});
-      }
-    }
   } catch (err) {
+    console.error("Search Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-
-// ENDPOINT ÚNICO Y OPTIMIZADO
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
     const { id } = req.query;
@@ -140,25 +90,18 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     const cacheKey = id.trim();
     const cached = streamCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < STREAM_CACHE_TTL) {
-      console.log("[API/stream] Cache hit:", cacheKey);
       return res.json({ url: cached.url });
     }
-
-    console.log("[API/stream] Request ID:", id);
 
     const url = (id.startsWith("http://") || id.startsWith("https://"))
       ? id
       : `https://www.youtube.com/watch?v=${id}`;
 
-    console.log("[API/stream] Resolviendo stream para:", url);
-
-    // 1. Try yt-dlp (fast, ~1-3s)
     if (resolveWithYtDlp) {
       try {
         const streamUrl = await resolveWithYtDlp(url);
         if (streamUrl) {
           streamCache.set(cacheKey, { url: streamUrl, ts: Date.now() });
-          console.log("[API/stream] yt-dlp success:", cacheKey);
           return res.json({ url: streamUrl });
         }
       } catch (ytErr) {
@@ -166,29 +109,11 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       }
     }
 
-    // 2. Fallback to play-dl
-    console.log("[API/stream] Fallback to play-dl");
-    try {
-      const info = await play.video_info(url);
-      const stream = await play.stream_from_info(info, { quality: 2 });
-      if (stream?.url) {
-        streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
-        console.log("[API/stream] play-dl cached:", cacheKey);
-        return res.json({ url: stream.url });
-      }
-    } catch (pdErr) {
-      console.warn("[API/stream] play-dl failed:", pdErr.message);
-    }
-
-    // 3. Last resort: try play-dl with soundcloud quality fallback
-    try {
-      const stream = await play.stream(url, { quality: 1, seek: 0 });
-      if (stream?.url) {
-        streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
-        return res.json({ url: stream.url });
-      }
-    } catch (pdErr2) {
-      console.warn("[API/stream] play-dl last resort failed:", pdErr2.message);
+    const info = await play.video_info(url);
+    const stream = await play.stream_from_info(info, { quality: 2 });
+    if (stream?.url) {
+      streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
+      return res.json({ url: stream.url });
     }
 
     return res.status(404).json({ error: "No audio stream found" });
@@ -198,12 +123,10 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
   }
 });
 
-
 app.get("/api/lyrics", requireApiKey, async (req, res) => {
   try {
     const { track, artist, album } = req.query;
     if (!track) return res.status(400).json({ error: "Missing 'track' parameter" });
-
     const result = await getLyrics(track, artist || "", album || "");
     res.json(result);
   } catch (err) {
@@ -213,8 +136,7 @@ app.get("/api/lyrics", requireApiKey, async (req, res) => {
 
 app.get("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 0;
-    const songs = await db.getLikedSongs(req.params.userId, limit);
+    const songs = await db.getLikedSongs(req.params.userId, parseInt(req.query.limit) || 0);
     res.json({ count: songs.length, songs });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -224,33 +146,12 @@ app.get("/api/likes/:userId", requireApiKey, async (req, res) => {
 app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
     const { trackTitle, trackAuthor, trackUrl, trackDuration, artworkUrl, isrc } = req.body;
-    if (!trackTitle || !trackAuthor) {
-      return res.status(400).json({ error: "Missing required fields: trackTitle, trackAuthor" });
-    }
-
     const mockTrack = {
-      info: {
-        title: trackTitle,
-        author: trackAuthor,
-        uri: trackUrl || "",
-        duration: trackDuration || 0,
-        artworkUrl: artworkUrl || "",
-      },
-      pluginInfo: { isrc: isrc || null },
+      info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "" },
+      pluginInfo: { isrc: isrc || null }
     };
-
     const added = await db.addLikedSong(req.params.userId, mockTrack);
     res.json({ added });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete("/api/likes/:userId/:id", requireApiKey, async (req, res) => {
-  try {
-    const removed = await db.removeLikedSong(req.params.userId, parseInt(req.params.id));
-    if (!removed) return res.status(404).json({ error: "Like not found" });
-    res.json({ removed: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -259,8 +160,6 @@ app.delete("/api/likes/:userId/:id", requireApiKey, async (req, res) => {
 app.delete("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
     const { trackUrl } = req.body;
-    if (!trackUrl) return res.status(400).json({ error: "Missing 'trackUrl'" });
-
     const mockTrack = { info: { uri: trackUrl } };
     const removed = await db.removeLikedSongByTrack(req.params.userId, mockTrack);
     res.json({ removed });
@@ -269,153 +168,22 @@ app.delete("/api/likes/:userId", requireApiKey, async (req, res) => {
   }
 });
 
-app.delete("/api/likes/:userId/all", requireApiKey, async (req, res) => {
-  try {
-    const count = await db.removeAllLikedSongs(req.params.userId);
-    res.json({ removed: count });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/artists/:userId", requireApiKey, async (req, res) => {
-  try {
-    const artists = await db.getLikedArtists(req.params.userId);
-    res.json({ artists });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get("/api/stats/:userId", requireApiKey, async (req, res) => {
   try {
     const stats = await db.getUserStats(req.params.userId);
-    if (!stats) return res.json({ stats: null });
     res.json({ stats });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/api/stats/top", requireApiKey, async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 10;
-    const top = await db.getTopListeners(limit);
-    res.json({ top });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/top-tracks/:userId", requireApiKey, async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 10;
-    const tracks = await db.getMostPlayedTracks(req.params.userId, limit);
-    res.json({ tracks });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/recommendations/:userId", requireApiKey, async (req, res) => {
-  try {
-    const liked = await db.getLikedSongs(req.params.userId, 5);
-    if (!liked.length) return res.json({ tracks: [] });
-
-    const spotifyIds = liked.map(s => s.isrc).filter(Boolean);
-    if (!spotifyIds.length) return res.json({ tracks: [] });
-
-    const spotifyTracks = await spotify.searchTracks(
-      `${liked[0].track_title} ${liked[0].track_author}`,
-      5
-    );
-    const seedIds = spotifyTracks.map(t => t.id).filter(Boolean).slice(0, 5);
-    if (!seedIds.length) return res.json({ tracks: [] });
-
-    const recs = await spotify.getRecommendations(seedIds);
-    res.json({ tracks: recs });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/spotify/search", requireApiKey, async (req, res) => {
-  try {
-    const q = req.query.q;
-    if (!q) return res.status(400).json({ error: "Missing 'q' parameter" });
-    const limit = parseInt(req.query.limit) || 5;
-    const tracks = await spotify.searchTracks(q, limit);
-    res.json({ tracks });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/artist-image", requireApiKey, async (req, res) => {
-  try {
-    const name = req.query.name;
-    if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
-
-    // --- Source 1: Deezer (free, no auth, best artist images) ---
-    try {
-      const deezerRes = await axios.get(
-        `https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=3`,
-        { timeout: 5000 }
-      );
-      const deezerArtist = deezerRes.data?.data?.find(
-        a => a.name?.toLowerCase() === name.toLowerCase()
-      ) || deezerRes.data?.data?.[0];
-      if (deezerArtist?.picture_medium) {
-        console.log(`[ArtistImage] Deezer: "${name}" → ${deezerArtist.name}`);
-        return res.json({ url: deezerArtist.picture_medium });
-      }
-    } catch (e) {
-      console.warn(`[ArtistImage] Deezer failed: ${e.message}`);
-    }
-
-    // --- Source 2: Lavalink YouTube Music (channel avatars) ---
-    try {
-      const searchUrl = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(`ytmsearch:${name}`)}`;
-      const ytRes = await axios.get(searchUrl, {
-        headers: { Authorization: LAVALINK_AUTH },
-        timeout: 10000,
-      });
-      const firstTrack = ytRes.data?.data?.[0]?.info;
-      if (firstTrack?.artworkUrl) {
-        console.log(`[ArtistImage] YouTube: "${name}" → ${firstTrack.artworkUrl}`);
-        return res.json({ url: firstTrack.artworkUrl });
-      }
-      const videoId = firstTrack?.uri?.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
-      if (videoId) {
-        const url = `https://i.ytimg.com/vi/${videoId}/default.jpg`;
-        console.log(`[ArtistImage] Constructed: "${name}" → ${url}`);
-        return res.json({ url });
-      }
-    } catch (e) {
-      console.warn(`[ArtistImage] YouTube failed: ${e.message}`);
-    }
-
-    console.log(`[ArtistImage] No image found for "${name}"`);
-    res.json({ url: null });
-  } catch (err) {
-    console.error(`[ArtistImage] Error for "${name}":`, err.message);
-    res.json({ url: null });
-  }
-});
-
 app.get("/api/playlists/:userId", requireApiKey, async (req, res) => {
   try {
     const guildId = req.query.guildId;
-    if (!guildId) return res.status(400).json({ error: "Missing 'guildId' query" });
-
-    if (req.query.name) {
-      const playlists = await db.getUserPlaylists(guildId, req.params.userId);
-      res.json({ playlists });
-    } else {
-      const guildPlaylists = await db.getGuildPlaylists(guildId);
-      const userPlaylists = guildPlaylists.filter(p => p.user_id === req.params.userId);
-      res.json({ playlists: userPlaylists });
-    }
+    if (!guildId) return res.status(400).json({ error: "Missing 'guildId'" });
+    const guildPlaylists = await db.getGuildPlaylists(guildId);
+    const userPlaylists = guildPlaylists.filter(p => p.user_id === req.params.userId);
+    res.json({ playlists: userPlaylists });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -424,9 +192,6 @@ app.get("/api/playlists/:userId", requireApiKey, async (req, res) => {
 app.post("/api/playlists/:userId", requireApiKey, async (req, res) => {
   try {
     const { guildId, name, tracks } = req.body;
-    if (!guildId || !name || !tracks) {
-      return res.status(400).json({ error: "Missing required fields: guildId, name, tracks" });
-    }
     const id = await db.savePlaylist(guildId, req.params.userId, name, tracks);
     res.json({ id });
   } catch (err) {
@@ -434,54 +199,4 @@ app.post("/api/playlists/:userId", requireApiKey, async (req, res) => {
   }
 });
 
-app.delete("/api/playlists/:userId/:index", requireApiKey, async (req, res) => {
-  try {
-    const guildId = req.query.guildId;
-    if (!guildId) return res.status(400).json({ error: "Missing 'guildId' query" });
-    const result = await db.deletePlaylist(parseInt(req.params.index), guildId);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/history/:guildId", requireApiKey, async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 50;
-    const history = await db.getHistory(req.params.guildId, limit);
-    res.json({ history });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/tts", requireApiKey, async (req, res) => {
-  try {
-    const { text, voice } = req.body;
-    if (!text) return res.status(400).json({ error: "Missing 'text' parameter" });
-
-    const { getTTSUrl } = require("../utils/ttsService");
-    const url = getTTSUrl(text);
-
-    const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!response.ok) return res.status(502).json({ error: `TTS provider returned ${response.status}` });
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    res.set("Content-Type", "audio/mpeg");
-    res.set("Cache-Control", "public, max-age=86400");
-    res.send(buffer);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-function startApi(port) {
-  return new Promise((resolve) => {
-    app.listen(port, () => {
-      console.log(`[API] Music API running on port ${port}`);
-      resolve();
-    });
-  });
-}
-
-module.exports = { app, startApi };
+module.exports = { app };
