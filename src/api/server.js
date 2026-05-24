@@ -1,5 +1,11 @@
 const express = require("express");
-const { requireApiKey } = require("./middleware/auth");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const passport = require("passport");
+const DiscordStrategy = require("passport-discord").Strategy;
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const User = require("../models/User");
+const { requireApiKey, requireAuth } = require("./middleware/auth");
 const db = require("../database");
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
@@ -34,6 +40,7 @@ const LAVALINK_AUTH = process.env.LAVALINK_PASSWORD || "youshallnotpass";
 
 const app = express();
 app.use(express.json());
+app.use(passport.initialize());
 
 // Logger simple para debug en Render
 app.use((req, res, next) => {
@@ -197,11 +204,8 @@ app.get("/api/stats/:userId", requireApiKey, async (req, res) => {
 
 app.get("/api/playlists/:userId", requireApiKey, async (req, res) => {
   try {
-    const guildId = req.query.guildId;
-    if (!guildId) return res.status(400).json({ error: "Missing 'guildId'" });
-    const guildPlaylists = await db.getGuildPlaylists(guildId);
-    const userPlaylists = guildPlaylists.filter(p => p.user_id === req.params.userId);
-    res.json({ playlists: userPlaylists });
+    const playlists = await db.getUserPlaylists(req.params.userId);
+    res.json({ playlists });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -209,8 +213,8 @@ app.get("/api/playlists/:userId", requireApiKey, async (req, res) => {
 
 app.post("/api/playlists/:userId", requireApiKey, async (req, res) => {
   try {
-    const { guildId, name, tracks } = req.body;
-    const id = await db.savePlaylist(guildId, req.params.userId, name, tracks);
+    const { name, tracks } = req.body;
+    const id = await db.savePlaylist(req.params.userId, name, tracks);
     res.json({ id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -258,6 +262,179 @@ app.get("/api/top-tracks/:userId", requireApiKey, async (req, res) => {
   } catch (err) {
     res.json({ tracks: [] });
   }
+});
+
+// ── Auth routes ──────────────────────────────────────────────────────
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
+const JWT_EXPIRES = "30d";
+
+function signToken(user) {
+  return jwt.sign({ sub: user._id.toString() }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+}
+
+// ── Discord OAuth Strategy ────────────────────────────────────────────
+passport.use(new DiscordStrategy({
+  clientID: process.env.DISCORD_CLIENT_ID,
+  clientSecret: process.env.DISCORD_CLIENT_SECRET,
+  callbackURL: process.env.DISCORD_CALLBACK_URL || "/api/auth/discord/callback",
+  scope: ["identify", "email"],
+}, async (accessToken, refreshToken, profile, done) => {
+  try {
+    let user = await User.findOne({ discordId: profile.id });
+    if (user) return done(null, user);
+
+    const email = profile.email || null;
+    if (email) {
+      user = await User.findOne({ email });
+      if (user) {
+        user.discordId = profile.id;
+        if (!user.avatar && profile.avatar) user.avatar = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`;
+        await user.save();
+        return done(null, user);
+      }
+    }
+
+    user = await User.create({
+      username: profile.username || profile.global_name || `discord_${profile.id}`,
+      email,
+      discordId: profile.id,
+      avatar: profile.avatar ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png` : "",
+    });
+    return done(null, user);
+  } catch (err) {
+    return done(err);
+  }
+}));
+
+// ── Google OAuth Strategy ─────────────────────────────────────────────
+passport.use(new GoogleStrategy({
+  clientID: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL: process.env.GOOGLE_CALLBACK_URL || "/api/auth/google/callback",
+  scope: ["profile", "email"],
+}, async (accessToken, refreshToken, profile, done) => {
+  try {
+    // 1. Buscar por googleId
+    let user = await User.findOne({ googleId: profile.id });
+    if (user) return done(null, user);
+
+    // 2. Si tiene email, buscar si ya existe la cuenta y vincularla
+    const email = profile.emails?.[0]?.value || null;
+    if (email) {
+      user = await User.findOne({ email });
+      if (user) {
+        user.googleId = profile.id;
+        if (!user.avatar && profile.photos?.[0]?.value) {
+          user.avatar = profile.photos[0].value;
+        }
+        await user.save();
+        return done(null, user);
+      }
+    }
+
+    // 3. Crear nuevo usuario
+    user = await User.create({
+      username: profile.displayName || profile.name?.givenName || `google_${profile.id}`,
+      email,
+      googleId: profile.id,
+      avatar: profile.photos?.[0]?.value || "",
+    });
+    return done(null, user);
+  } catch (err) {
+    return done(err);
+  }
+}));
+
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: "username, email, and password are required" });
+    }
+
+    const existing = await User.findOne({ email: email.toLowerCase() }).exec();
+    if (existing) {
+      return res.status(409).json({ error: "Email already registered" });
+    }
+
+    const user = await User.create({ username, email: email.toLowerCase(), password });
+    const token = signToken(user);
+    res.status(201).json({ token, user: user.toPublicJSON() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password are required" });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() }).exec();
+    if (!user || !user.password) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const token = signToken(user);
+    res.json({ token, user: user.toPublicJSON() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).exec();
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json({ user: user.toPublicJSON() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Discord OAuth routes ──────────────────────────────────────────────
+app.get("/api/auth/discord", passport.authenticate("discord", { session: false }));
+
+app.get("/api/auth/discord/callback", (req, res, next) => {
+  passport.authenticate("discord", { session: false }, (err, user) => {
+    if (err || !user) {
+      const url = process.env.CLIENT_URL || "musicapp://auth";
+      return res.redirect(`${url}?error=auth_failed`);
+    }
+    const token = signToken(user);
+    const url = process.env.CLIENT_URL || "musicapp://auth";
+    res.redirect(`${url}?token=${token}`);
+  })(req, res, next);
+});
+
+// ── Google OAuth routes ───────────────────────────────────────────────
+app.get("/api/auth/google",
+  passport.authenticate("google", { session: false, scope: ["profile", "email"] })
+);
+
+app.get("/api/auth/google/callback", (req, res, next) => {
+  passport.authenticate("google", { session: false }, (err, user) => {
+    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+    if (err || !user) {
+      console.error("[Google OAuth] Error:", err?.message);
+      return res.redirect(`${clientUrl}?error=auth_failed&provider=google`);
+    }
+    const token = signToken(user);
+    return res.redirect(`${clientUrl}?token=${token}&provider=google`);
+  })(req, res, next);
+});
+
+// Global error handler
+app.use(function (err, req, res, next) {
+  console.error("[ERROR] global handler:", err.stack || err);
+  res.status(500).json({ error: err.message || "Internal server error" });
 });
 
 module.exports = { app };

@@ -14,10 +14,9 @@ async function main() {
     console.log("✅ Database initialized");
   } catch (err) {
     console.error("❌ Database initialization failed:", err.message);
-    // No salimos, intentamos seguir para que el health check pueda responder error si es necesario
   }
 
-  // 2. Iniciar Servidor Express (Maneja todo: API + Health Check)
+  // 2. Iniciar Servidor Express
   musicApi.listen(PORT, () => {
     console.log(`[SERVER] Running on port ${PORT}`);
   });

@@ -1,3 +1,4 @@
+require("./dns-patch");
 const mongoose = require("mongoose");
 
 let dbReady = false;
@@ -19,14 +20,13 @@ const userStatsSchema = new mongoose.Schema({
 userStatsSchema.index({ totalListenTime: -1 });
 
 const playlistSchema = new mongoose.Schema({
-  guildId: { type: String, required: true },
   userId: { type: String, required: true },
   name: { type: String, required: true },
   tracks: { type: Array, default: [] },
 }, { timestamps: true });
 
 const historySchema = new mongoose.Schema({
-  guildId: { type: String, required: true },
+  userId: { type: String, required: true },
   trackTitle: String,
   trackAuthor: String,
   trackUrl: String,
@@ -79,7 +79,8 @@ const TrackPlay = mongoose.model("TrackPlay", trackPlaySchema);
 const DislikedSong = mongoose.model("DislikedSong", dislikedSongSchema);
 
 async function initDB() {
-  const uri = process.env.MONGODB_URI || "mongodb://localhost:27017/musicbot";
+  const uri = process.env.ANDROID_MONGODB_URI || process.env.MONGODB_URI || "mongodb://localhost:27017/musicbot";
+  console.log("🔌 Intentando conectar a MongoDB:", uri.replace(/:([^@]+)@/, ":******@")); // Ocultar contraseña
   await mongoose.connect(uri);
   dbReady = true;
   queue.forEach(fn => fn());
@@ -125,20 +126,19 @@ async function getTopListeners(limit = 10) {
 }
 
 // ── Playlists ───────────────────────────────────────────────────────────
-async function savePlaylist(guildId, userId, name, tracks) {
+async function savePlaylist(userId, name, tracks) {
   await whenReady(() => {});
-  const doc = await Playlist.create({ guildId, userId, name, tracks });
+  const doc = await Playlist.create({ userId, name, tracks });
   return doc._id.toString();
 }
 
-async function getPlaylist(index, guildId) {
+async function getPlaylist(index, userId) {
   await whenReady(() => {});
-  const docs = await Playlist.find({ guildId }).sort({ createdAt: -1 }).lean();
+  const docs = await Playlist.find({ userId }).sort({ createdAt: -1 }).lean();
   const doc = docs[index - 1];
   if (!doc) return null;
   return {
     id: (index).toString(),
-    guild_id: doc.guildId,
     user_id: doc.userId,
     name: doc.name,
     tracks: JSON.stringify(doc.tracks),
@@ -146,12 +146,11 @@ async function getPlaylist(index, guildId) {
   };
 }
 
-async function getGuildPlaylists(guildId) {
+async function getUserPlaylists(userId) {
   await whenReady(() => {});
-  const docs = await Playlist.find({ guildId }).sort({ createdAt: -1 }).lean();
+  const docs = await Playlist.find({ userId }).sort({ createdAt: -1 }).lean();
   return docs.map(doc => ({
     id: doc._id.toString(),
-    guild_id: doc.guildId,
     user_id: doc.userId,
     name: doc.name,
     tracks: JSON.stringify(doc.tracks),
@@ -159,9 +158,9 @@ async function getGuildPlaylists(guildId) {
   }));
 }
 
-async function deletePlaylist(index, guildId) {
+async function deletePlaylist(index, userId) {
   await whenReady(() => {});
-  const docs = await Playlist.find({ guildId }).sort({ createdAt: -1 }).lean();
+  const docs = await Playlist.find({ userId }).sort({ createdAt: -1 }).lean();
   const target = docs[index - 1];
   if (!target) return { changes: 0 };
   const res = await Playlist.deleteOne({ _id: target._id });
@@ -169,10 +168,10 @@ async function deletePlaylist(index, guildId) {
 }
 
 // ── History ──────────────────────────────────────────────────────────────
-async function addToHistory(guildId, track) {
+async function addToHistory(userId, track) {
   await whenReady(() => {});
   return History.create({
-    guildId,
+    userId,
     trackTitle: track.info.title,
     trackAuthor: cleanAuthor(track.info.author),
     trackUrl: track.info.uri,
@@ -180,12 +179,12 @@ async function addToHistory(guildId, track) {
   });
 }
 
-async function getHistory(guildId, limit = 50) {
+async function getHistory(userId, limit = 50) {
   await whenReady(() => {});
-  const docs = await History.find({ guildId }).sort({ playedAt: -1 }).limit(limit).lean();
+  const docs = await History.find({ userId }).sort({ playedAt: -1 }).limit(limit).lean();
   return docs.map(doc => ({
     id: doc._id.toString(),
-    guild_id: doc.guildId,
+    user_id: doc.userId,
     track_title: doc.trackTitle,
     track_author: doc.trackAuthor,
     track_url: doc.trackUrl,
@@ -194,9 +193,9 @@ async function getHistory(guildId, limit = 50) {
   }));
 }
 
-async function clearHistory(guildId) {
+async function clearHistory(userId) {
   await whenReady(() => {});
-  const res = await History.deleteMany({ guildId });
+  const res = await History.deleteMany({ userId });
   return { changes: res.deletedCount };
 }
 
@@ -407,30 +406,24 @@ async function copyLikedSongs(fromUserId, toUserId) {
   return { copied: toInsert.length, skipped: sourceSongs.length - toInsert.length, total: sourceSongs.length };
 }
 
-async function copyPlaylist(guildId, fromUserId, toUserId, playlistName) {
+async function copyPlaylist(fromUserId, toUserId, playlistName) {
   await whenReady(() => {});
-  const playlist = await Playlist.findOne({ guildId, userId: fromUserId, name: playlistName }).lean();
+  const playlist = await Playlist.findOne({ userId: fromUserId, name: playlistName }).lean();
   if (!playlist) return null;
 
   let targetName = playlist.name;
-  const exists = await Playlist.findOne({ guildId, userId: toUserId, name: targetName });
+  const exists = await Playlist.findOne({ userId: toUserId, name: targetName });
   if (exists) {
     targetName = `${playlist.name} (Copy)`;
   }
 
   await Playlist.create({
-    guildId,
     userId: toUserId,
     name: targetName,
     tracks: playlist.tracks,
   });
 
   return { name: targetName, trackCount: playlist.tracks.length };
-}
-
-async function getUserPlaylists(guildId, userId) {
-  await whenReady(() => {});
-  return Playlist.find({ guildId, userId }).sort({ name: 1 }).lean();
 }
 
 // ── Disliked Songs ──────────────────────────────────────────────────────
@@ -480,7 +473,7 @@ module.exports = {
   getTopListeners,
   savePlaylist,
   getPlaylist,
-  getGuildPlaylists,
+  getUserPlaylists,
   deletePlaylist,
   addToHistory,
   getHistory,
@@ -498,7 +491,6 @@ module.exports = {
   getMostPlayedTracks,
   copyLikedSongs,
   copyPlaylist,
-  getUserPlaylists,
   addDislikedSong,
   getDislikedKeys,
   getDislikedSongs,
