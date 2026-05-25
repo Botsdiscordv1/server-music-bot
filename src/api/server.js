@@ -7,6 +7,7 @@ const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const User = require("../models/User");
 const { requireApiKey, requireAuth } = require("./middleware/auth");
 const db = require("../database");
+const { DiscordUser } = db;
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
 const axios = require("axios");
@@ -161,7 +162,9 @@ app.get("/api/lyrics", requireApiKey, async (req, res) => {
 
 app.get("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
-    const songs = await db.getLikedSongs(req.params.userId, parseInt(req.query.limit) || 0);
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const songs = await db.getLikedSongs(userId, parseInt(req.query.limit) || 0, source);
     res.json({ count: songs.length, songs });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -170,12 +173,14 @@ app.get("/api/likes/:userId", requireApiKey, async (req, res) => {
 
 app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
     const { trackTitle, trackAuthor, trackUrl, trackDuration, artworkUrl, isrc } = req.body;
     const mockTrack = {
       info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "" },
       pluginInfo: { isrc: isrc || null }
     };
-    const added = await db.addLikedSong(req.params.userId, mockTrack);
+    const added = await db.addLikedSong(userId, mockTrack, source);
     res.json({ added });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -184,9 +189,11 @@ app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
 
 app.delete("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
     const { trackUrl } = req.body;
     const mockTrack = { info: { uri: trackUrl } };
-    const removed = await db.removeLikedSongByTrack(req.params.userId, mockTrack);
+    const removed = await db.removeLikedSongByTrack(userId, mockTrack, source);
     res.json({ removed });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -195,7 +202,9 @@ app.delete("/api/likes/:userId", requireApiKey, async (req, res) => {
 
 app.get("/api/stats/:userId", requireApiKey, async (req, res) => {
   try {
-    const stats = await db.getUserStats(req.params.userId);
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const stats = await db.getUserStats(userId, source);
     res.json({ stats });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -204,7 +213,9 @@ app.get("/api/stats/:userId", requireApiKey, async (req, res) => {
 
 app.get("/api/playlists/:userId", requireApiKey, async (req, res) => {
   try {
-    const playlists = await db.getUserPlaylists(req.params.userId);
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const playlists = await db.getUserPlaylists(userId, source);
     res.json({ playlists });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -213,8 +224,10 @@ app.get("/api/playlists/:userId", requireApiKey, async (req, res) => {
 
 app.post("/api/playlists/:userId", requireApiKey, async (req, res) => {
   try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
     const { name, tracks } = req.body;
-    const id = await db.savePlaylist(req.params.userId, name, tracks);
+    const id = await db.savePlaylist(userId, name, tracks, source);
     res.json({ id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -223,7 +236,9 @@ app.post("/api/playlists/:userId", requireApiKey, async (req, res) => {
 
 app.get("/api/artists/:userId", requireApiKey, async (req, res) => {
   try {
-    const artists = await db.getLikedArtists(req.params.userId);
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const artists = await db.getLikedArtists(userId, source);
     res.json({ artists });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -244,7 +259,9 @@ app.get("/api/artist-image", requireApiKey, async (req, res) => {
 
 app.get("/api/recommendations/:userId", requireApiKey, async (req, res) => {
   try {
-    const liked = await db.getLikedSongs(req.params.userId, 5);
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const liked = await db.getLikedSongs(userId, 5, source);
     if (!liked.length) return res.json({ tracks: [] });
     const spotifyTracks = await spotify.searchTracks(`${liked[0].track_title} ${liked[0].track_author}`, 5);
     const seedIds = spotifyTracks.map(t => t.id).filter(Boolean).slice(0, 5);
@@ -257,7 +274,9 @@ app.get("/api/recommendations/:userId", requireApiKey, async (req, res) => {
 
 app.get("/api/top-tracks/:userId", requireApiKey, async (req, res) => {
   try {
-    const tracks = await db.getMostPlayedTracks(req.params.userId, parseInt(req.query.limit) || 10);
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const tracks = await db.getMostPlayedTracks(userId, parseInt(req.query.limit) || 10, source);
     res.json({ tracks });
   } catch (err) {
     res.json({ tracks: [] });
@@ -268,24 +287,29 @@ app.get("/api/top-tracks/:userId", requireApiKey, async (req, res) => {
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 const JWT_EXPIRES = "30d";
 
-function signToken(user) {
-  return jwt.sign({ sub: user._id.toString() }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+function signToken(user, provider = "android") {
+  const payload = { sub: user._id.toString(), provider };
+  if (provider === "discord" && user.discordId) {
+    payload.discordId = user.discordId;
+  }
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
 }
 
 // ── Discord OAuth Strategy ────────────────────────────────────────────
 passport.use(new DiscordStrategy({
   clientID: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  callbackURL: process.env.DISCORD_CALLBACK_URL || "/api/auth/discord/callback",
+  callbackURL: process.env.DISCORD_CALLBACK_URL || "http://192.168.18.81:3000/api/auth/discord/callback",
   scope: ["identify", "email"],
 }, async (accessToken, refreshToken, profile, done) => {
   try {
-    let user = await User.findOne({ discordId: profile.id });
+    if (!DiscordUser) return done(new Error("Discord database not configured"));
+    let user = await DiscordUser.findOne({ discordId: profile.id });
     if (user) return done(null, user);
 
     const email = profile.email || null;
     if (email) {
-      user = await User.findOne({ email });
+      user = await DiscordUser.findOne({ email });
       if (user) {
         user.discordId = profile.id;
         if (!user.avatar && profile.avatar) user.avatar = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`;
@@ -294,7 +318,7 @@ passport.use(new DiscordStrategy({
       }
     }
 
-    user = await User.create({
+    user = await DiscordUser.create({
       username: profile.username || profile.global_name || `discord_${profile.id}`,
       email,
       discordId: profile.id,
@@ -391,7 +415,8 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).exec();
+    const UserModel = req.provider === "discord" && DiscordUser ? DiscordUser : User;
+    const user = await UserModel.findById(req.mongoId).exec();
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json({ user: user.toPublicJSON() });
   } catch (err) {
@@ -408,13 +433,57 @@ app.get("/api/auth/discord/callback", (req, res, next) => {
       const url = process.env.CLIENT_URL || "musicapp://auth";
       return res.redirect(`${url}?error=auth_failed`);
     }
-    const token = signToken(user);
+    const token = signToken(user, "discord");
     const url = process.env.CLIENT_URL || "musicapp://auth";
     res.redirect(`${url}?token=${token}`);
   })(req, res, next);
 });
 
 // ── Google OAuth routes ───────────────────────────────────────────────
+// Endpoint para Android (Native Google Sign-In)
+app.post("/api/auth/google", async (req, res) => {
+  try {
+    const { id_token } = req.body;
+    const idToken = id_token || req.body.idToken; // Soporta ambos formatos por si acaso
+
+    if (!idToken) return res.status(400).json({ error: "idToken is required" });
+
+    // Verificar token con Google API (Sin librerías extra)
+    const googleRes = await axios.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+    const payload = googleRes.data;
+
+    if (!payload || googleRes.status !== 200) {
+      return res.status(401).json({ error: "Invalid Google token" });
+    }
+
+    const { sub: googleId, email, name, picture } = payload;
+
+    // 1. Buscar o vincular usuario
+    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+
+    if (!user) {
+      user = await User.create({
+        username: name || `google_${googleId}`,
+        email,
+        googleId,
+        avatar: picture || "",
+      });
+    } else if (!user.googleId) {
+      user.googleId = googleId;
+      if (!user.avatar) user.avatar = picture || "";
+      await user.save();
+    }
+
+    // 2. Generar JWT y responder
+    const token = signToken(user);
+    res.json({ token, user: user.toPublicJSON() });
+
+  } catch (err) {
+    console.error("[Google Auth POST] Error:", err.response?.data || err.message);
+    res.status(401).json({ error: "Google authentication failed" });
+  }
+});
+
 app.get("/api/auth/google",
   passport.authenticate("google", { session: false, scope: ["profile", "email"] })
 );

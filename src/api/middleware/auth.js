@@ -1,8 +1,22 @@
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 
-// Require a valid API key (x-api-key header or api_key query param)
+function resolveProviderUserId(payload) {
+  const provider = payload.provider || "android";
+  const userId = (provider === "discord" && payload.discordId) ? payload.discordId : payload.sub;
+  return { provider, userId, mongoId: payload.sub };
+}
+
 function requireApiKey(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    try {
+      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
+      Object.assign(req, resolveProviderUserId(payload));
+      return next();
+    } catch {}
+  }
+
   const apiKey = process.env.API_KEY;
   if (!apiKey) return next();
 
@@ -13,7 +27,6 @@ function requireApiKey(req, res, next) {
   next();
 }
 
-// Require a valid JWT (Authorization: Bearer <token>)
 function requireAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
@@ -23,7 +36,7 @@ function requireAuth(req, res, next) {
   const token = header.slice(7);
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    req.userId = payload.sub;
+    Object.assign(req, resolveProviderUserId(payload));
     next();
   } catch {
     return res.status(401).json({ error: "Unauthorized: invalid or expired token" });

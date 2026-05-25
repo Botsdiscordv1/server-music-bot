@@ -13,13 +13,29 @@ function resolveViaGoogle(hostname, rrtype) {
   });
 }
 
-const blockedDomain = "yvlqtyt.mongodb.net";
+const blockedDomains = [
+  "yvlqtyt.mongodb.net",
+  "ygb0lfg.mongodb.net",
+];
 
-function isBlocked(hostname) {
-  return typeof hostname === "string" && hostname.endsWith("." + blockedDomain);
+// Also scan env vars for any additional mongodb.net Atlas endpoints
+const MONGODB_URI_VARS = ["ANDROID_MONGODB_URI", "DISCORD_MONGODB_URI", "MONGODB_URI"];
+for (const v of MONGODB_URI_VARS) {
+  const uri = process.env[v];
+  if (!uri) continue;
+  const match = uri.match(/@([^\/:\?]+)/);
+  if (match) {
+    const host = match[1].replace(/^.*?\./, "");
+    if (host.endsWith("mongodb.net") && !blockedDomains.includes(host)) {
+      blockedDomains.push(host);
+    }
+  }
 }
 
-// --- Patch dns.promises.resolve (MongoDB driver uses this with rrtype) ---
+function isBlocked(hostname) {
+  return typeof hostname === "string" && blockedDomains.some(d => hostname === d || hostname.endsWith("." + d));
+}
+
 const origPromisesResolve = dnsPromises.resolve;
 dnsPromises.resolve = (hostname, rrtype) => {
   if (isBlocked(hostname)) {
@@ -28,4 +44,4 @@ dnsPromises.resolve = (hostname, rrtype) => {
   return origPromisesResolve(hostname, rrtype);
 };
 
-console.log("[DNS-PATCH] Google DNS resolver enabled for " + blockedDomain);
+console.log("[DNS-PATCH] Google DNS resolver enabled for " + blockedDomains.join(", "));

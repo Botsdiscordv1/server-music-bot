@@ -1,5 +1,6 @@
 require("./dns-patch");
 const mongoose = require("mongoose");
+const userSchema = require("./models/User").schema;
 
 let dbReady = false;
 const queue = [];
@@ -9,7 +10,6 @@ function whenReady(fn) {
   queue.push(fn);
 }
 
-// ── Schemas ──────────────────────────────────────────────────────────
 const userStatsSchema = new mongoose.Schema({
   userId: { type: String, unique: true, required: true },
   tracksPlayed: { type: Number, default: 0 },
@@ -71,6 +71,7 @@ function cleanAuthor(author) {
   return (author || "").replace(/\s*-\s*Topic$/i, "").trim();
 }
 
+// ── Android connection (default) ───────────────────────────────────────
 const UserStats = mongoose.model("UserStats", userStatsSchema);
 const Playlist = mongoose.model("Playlist", playlistSchema);
 const History = mongoose.model("History", historySchema);
@@ -78,18 +79,66 @@ const LikedSong = mongoose.model("LikedSong", likedSongSchema);
 const TrackPlay = mongoose.model("TrackPlay", trackPlaySchema);
 const DislikedSong = mongoose.model("DislikedSong", dislikedSongSchema);
 
+// ── Discord connection (separate DB) ──────────────────────────────────
+const discordUri = process.env.DISCORD_MONGODB_URI;
+const discordConn = discordUri ? mongoose.createConnection(discordUri) : null;
+
+let DiscordUser = null;
+let DiscordUserStats = null;
+let DiscordPlaylist = null;
+let DiscordHistory = null;
+let DiscordLikedSong = null;
+let DiscordTrackPlay = null;
+let DiscordDislikedSong = null;
+
+if (discordConn) {
+  DiscordUser = discordConn.model("User", userSchema);
+  DiscordUserStats = discordConn.model("UserStats", userStatsSchema);
+  DiscordPlaylist = discordConn.model("Playlist", playlistSchema);
+  DiscordHistory = discordConn.model("History", historySchema);
+  DiscordLikedSong = discordConn.model("LikedSong", likedSongSchema);
+  DiscordTrackPlay = discordConn.model("TrackPlay", trackPlaySchema);
+  DiscordDislikedSong = discordConn.model("DislikedSong", dislikedSongSchema);
+}
+
+function getModels(source) {
+  if (source === "discord" && discordConn) {
+    return {
+      UserStats: DiscordUserStats,
+      Playlist: DiscordPlaylist,
+      History: DiscordHistory,
+      LikedSong: DiscordLikedSong,
+      TrackPlay: DiscordTrackPlay,
+      DislikedSong: DiscordDislikedSong,
+    };
+  }
+  return { UserStats, Playlist, History, LikedSong, TrackPlay, DislikedSong };
+}
+
+// ── Init DB ─────────────────────────────────────────────────────────────
 async function initDB() {
   const uri = process.env.ANDROID_MONGODB_URI || process.env.MONGODB_URI || "mongodb://localhost:27017/musicbot";
-  console.log("🔌 Intentando conectar a MongoDB:", uri.replace(/:([^@]+)@/, ":******@")); // Ocultar contraseña
+  console.log("Conectado Android DB");
   await mongoose.connect(uri);
+
+  if (discordConn) {
+    try {
+      await discordConn.asPromise();
+      console.log("Conectado Discord DB");
+    } catch (err) {
+      console.warn("Discord DB no disponible (no fatal):", err.message);
+    }
+  }
+
   dbReady = true;
   queue.forEach(fn => fn());
   queue.length = 0;
-  console.log("✅ MongoDB connected");
+  console.log("MongoDB ready");
 }
 
 // ── User Stats ─────────────────────────────────────────────────────────
-async function updateUserStats(userId, trackDuration, artist) {
+async function updateUserStats(userId, trackDuration, artist, source = "android") {
+  const { UserStats } = getModels(source);
   await whenReady(() => {});
   return UserStats.findOneAndUpdate(
     { userId },
@@ -101,7 +150,8 @@ async function updateUserStats(userId, trackDuration, artist) {
   );
 }
 
-async function getUserStats(userId) {
+async function getUserStats(userId, source = "android") {
+  const { UserStats } = getModels(source);
   await whenReady(() => {});
   const doc = await UserStats.findOne({ userId }).lean();
   if (!doc) return null;
@@ -114,7 +164,8 @@ async function getUserStats(userId) {
   };
 }
 
-async function getTopListeners(limit = 10) {
+async function getTopListeners(limit = 10, source = "android") {
+  const { UserStats } = getModels(source);
   await whenReady(() => {});
   const docs = await UserStats.find().sort({ totalListenTime: -1 }).limit(limit).lean();
   return docs.map(doc => ({
@@ -126,13 +177,15 @@ async function getTopListeners(limit = 10) {
 }
 
 // ── Playlists ───────────────────────────────────────────────────────────
-async function savePlaylist(userId, name, tracks) {
+async function savePlaylist(userId, name, tracks, source = "android") {
+  const { Playlist } = getModels(source);
   await whenReady(() => {});
   const doc = await Playlist.create({ userId, name, tracks });
   return doc._id.toString();
 }
 
-async function getPlaylist(index, userId) {
+async function getPlaylist(index, userId, source = "android") {
+  const { Playlist } = getModels(source);
   await whenReady(() => {});
   const docs = await Playlist.find({ userId }).sort({ createdAt: -1 }).lean();
   const doc = docs[index - 1];
@@ -146,7 +199,8 @@ async function getPlaylist(index, userId) {
   };
 }
 
-async function getUserPlaylists(userId) {
+async function getUserPlaylists(userId, source = "android") {
+  const { Playlist } = getModels(source);
   await whenReady(() => {});
   const docs = await Playlist.find({ userId }).sort({ createdAt: -1 }).lean();
   return docs.map(doc => ({
@@ -158,7 +212,8 @@ async function getUserPlaylists(userId) {
   }));
 }
 
-async function deletePlaylist(index, userId) {
+async function deletePlaylist(index, userId, source = "android") {
+  const { Playlist } = getModels(source);
   await whenReady(() => {});
   const docs = await Playlist.find({ userId }).sort({ createdAt: -1 }).lean();
   const target = docs[index - 1];
@@ -168,7 +223,8 @@ async function deletePlaylist(index, userId) {
 }
 
 // ── History ──────────────────────────────────────────────────────────────
-async function addToHistory(userId, track) {
+async function addToHistory(userId, track, source = "android") {
+  const { History } = getModels(source);
   await whenReady(() => {});
   return History.create({
     userId,
@@ -179,7 +235,8 @@ async function addToHistory(userId, track) {
   });
 }
 
-async function getHistory(userId, limit = 50) {
+async function getHistory(userId, limit = 50, source = "android") {
+  const { History } = getModels(source);
   await whenReady(() => {});
   const docs = await History.find({ userId }).sort({ playedAt: -1 }).limit(limit).lean();
   return docs.map(doc => ({
@@ -193,18 +250,14 @@ async function getHistory(userId, limit = 50) {
   }));
 }
 
-async function clearHistory(userId) {
+async function clearHistory(userId, source = "android") {
+  const { History } = getModels(source);
   await whenReady(() => {});
   const res = await History.deleteMany({ userId });
   return { changes: res.deletedCount };
 }
 
 // ── Liked Songs ─────────────────────────────────────────────────────────
-
-/**
- * Extracts the ISRC from a Lavalink track, if available.
- * Checks multiple sources in order: pluginInfo.isrc, info.isrc, info.extra.isrc, info.identifier (ISRC format).
- */
 function extractIsrc(track) {
   if (!track?.info) return null;
   if (track.pluginInfo?.isrc) return track.pluginInfo.isrc;
@@ -216,7 +269,8 @@ function extractIsrc(track) {
   return null;
 }
 
-async function addLikedSong(userId, track) {
+async function addLikedSong(userId, track, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   try {
     const exists = await LikedSong.findOne({ userId, trackUrl: track.info.uri });
@@ -235,7 +289,8 @@ async function addLikedSong(userId, track) {
   } catch { return false; }
 }
 
-async function removeLikedSong(userId, id) {
+async function removeLikedSong(userId, id, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   const songs = await LikedSong.find({ userId }).sort({ likedAt: -1 }).lean();
   const target = songs[id - 1];
@@ -244,7 +299,8 @@ async function removeLikedSong(userId, id) {
   return target;
 }
 
-async function removeLikedSongByTrack(userId, track) {
+async function removeLikedSongByTrack(userId, track, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   const url = track?.info?.uri;
   if (url) {
@@ -265,13 +321,15 @@ async function removeLikedSongByTrack(userId, track) {
   return false;
 }
 
-async function removeAllLikedSongs(userId) {
+async function removeAllLikedSongs(userId, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   const result = await LikedSong.deleteMany({ userId });
   return result.deletedCount;
 }
 
-async function getLikedSongs(userId, limit = 0) {
+async function getLikedSongs(userId, limit = 0, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   let query = LikedSong.find({ userId }).sort({ likedAt: -1 });
   if (limit > 0) query = query.limit(limit);
@@ -289,7 +347,8 @@ async function getLikedSongs(userId, limit = 0) {
   }));
 }
 
-async function isSongLiked(userId, track) {
+async function isSongLiked(userId, track, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   if (!track?.info) return false;
   const url = track.info.uri;
@@ -318,20 +377,17 @@ async function isSongLiked(userId, track) {
 function isSongInLikes(likedSongs, track) {
   if (!track?.info || !likedSongs || likedSongs.length === 0) return false;
 
-  // Priority 1: URL match (matches addLikedSong's uniqueness check)
   const currentUrl = track.info.uri;
   if (currentUrl && likedSongs.some(s => s.track_url === currentUrl)) {
     return true;
   }
 
-  // Priority 2: ISRC match
   const currentIsrc = extractIsrc(track);
   if (currentIsrc) {
     const isrcMatch = likedSongs.some(s => s.isrc && s.isrc === currentIsrc);
     if (isrcMatch) return true;
   }
 
-  // Priority 3: exact title + exact artist (case-insensitive, strict otherwise)
   const currentTitle = (track.info.title || "").toLowerCase();
   const currentAuthor = (track.info.author || "").replace(/\s*-\s*topic$/i, "").toLowerCase().trim();
 
@@ -348,7 +404,8 @@ function isSongInLikes(likedSongs, track) {
   return false;
 }
 
-async function getLikedArtists(userId) {
+async function getLikedArtists(userId, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   const docs = await LikedSong.find({ userId, trackAuthor: { $ne: null } }).lean();
   const counts = {};
@@ -361,7 +418,8 @@ async function getLikedArtists(userId) {
     .sort((a, b) => b.count - a.count);
 }
 
-async function incrementTrackPlay(userId, trackTitle, trackAuthor, trackUrl) {
+async function incrementTrackPlay(userId, trackTitle, trackAuthor, trackUrl, source = "android") {
+  const { TrackPlay } = getModels(source);
   await whenReady(() => {});
   return TrackPlay.findOneAndUpdate(
     { userId, trackUrl },
@@ -370,7 +428,8 @@ async function incrementTrackPlay(userId, trackTitle, trackAuthor, trackUrl) {
   );
 }
 
-async function getMostPlayedTracks(userId, limit = 10) {
+async function getMostPlayedTracks(userId, limit = 10, source = "android") {
+  const { TrackPlay } = getModels(source);
   await whenReady(() => {});
   const docs = await TrackPlay.find({ userId }).sort({ playCount: -1 }).limit(limit).lean();
   return docs.map(doc => ({
@@ -381,7 +440,8 @@ async function getMostPlayedTracks(userId, limit = 10) {
   }));
 }
 
-async function copyLikedSongs(fromUserId, toUserId) {
+async function copyLikedSongs(fromUserId, toUserId, source = "android") {
+  const { LikedSong } = getModels(source);
   await whenReady(() => {});
   const sourceSongs = await LikedSong.find({ userId: fromUserId }).lean();
   if (sourceSongs.length === 0) return { copied: 0, skipped: 0, total: 0 };
@@ -406,7 +466,8 @@ async function copyLikedSongs(fromUserId, toUserId) {
   return { copied: toInsert.length, skipped: sourceSongs.length - toInsert.length, total: sourceSongs.length };
 }
 
-async function copyPlaylist(fromUserId, toUserId, playlistName) {
+async function copyPlaylist(fromUserId, toUserId, playlistName, source = "android") {
+  const { Playlist } = getModels(source);
   await whenReady(() => {});
   const playlist = await Playlist.findOne({ userId: fromUserId, name: playlistName }).lean();
   if (!playlist) return null;
@@ -427,7 +488,8 @@ async function copyPlaylist(fromUserId, toUserId, playlistName) {
 }
 
 // ── Disliked Songs ──────────────────────────────────────────────────────
-async function addDislikedSong(userId, track) {
+async function addDislikedSong(userId, track, source = "android") {
+  const { DislikedSong } = getModels(source);
   await whenReady(() => {});
   const title = track.info?.title || track.track_title || "";
   const author = track.info?.author || track.track_author || "";
@@ -441,23 +503,27 @@ async function addDislikedSong(userId, track) {
   }
 }
 
-async function getDislikedKeys(userId) {
+async function getDislikedKeys(userId, source = "android") {
+  const { DislikedSong } = getModels(source);
   await whenReady(() => {});
   const docs = await DislikedSong.find({ userId }).lean();
   return new Set(docs.map(d => d.trackKey));
 }
 
-async function getDislikedSongs(userId) {
+async function getDislikedSongs(userId, source = "android") {
+  const { DislikedSong } = getModels(source);
   await whenReady(() => {});
   return DislikedSong.find({ userId }).sort({ dislikedAt: -1 }).lean();
 }
 
-async function removeDislikedSong(userId, trackKey) {
+async function removeDislikedSong(userId, trackKey, source = "android") {
+  const { DislikedSong } = getModels(source);
   await whenReady(() => {});
   await DislikedSong.deleteOne({ userId, trackKey });
 }
 
-async function removeDislikedSongById(userId, id) {
+async function removeDislikedSongById(userId, id, source = "android") {
+  const { DislikedSong } = getModels(source);
   await whenReady(() => {});
   const songs = await DislikedSong.find({ userId }).sort({ dislikedAt: -1 }).lean();
   const target = songs[id - 1];
@@ -496,5 +562,5 @@ module.exports = {
   getDislikedSongs,
   removeDislikedSong,
   removeDislikedSongById,
+  DiscordUser,
 };
-
