@@ -17,8 +17,12 @@ async function main() {
   }
 
   // 2. Iniciar Servidor Express
-  musicApi.listen(PORT, () => {
+  const server = musicApi.listen(PORT, () => {
     console.log(`[SERVER] Running on port ${PORT}`);
+  });
+  server.on("error", (err) => {
+    console.error(`[SERVER] Failed to start on port ${PORT}:`, err.message);
+    process.exit(1);
   });
 
   // 3. TTS Keepalive (Opcional, si está configurado)
