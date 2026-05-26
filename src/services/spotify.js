@@ -282,6 +282,37 @@ async function searchArtists(query, limit = 3) {
 }
 
 /**
+ * Search for albums on Spotify.
+ * @param {string} query
+ * @param {number} limit
+ * @returns {Array<{ id: string, name: string, artists: string, image: string, releaseDate: string, totalTracks: number, uri: string }>}
+ */
+async function searchAlbums(query, limit = 5) {
+  const token = await getAccessToken();
+  try {
+    const res = await api.get("https://api.spotify.com/v1/search", {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { q: query, type: "album", limit },
+    });
+    return (res.data.albums?.items || []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      artists: a.artists.map((art) => art.name).join(", "),
+      image: a.images?.[0]?.url || null,
+      releaseDate: a.release_date,
+      totalTracks: a.total_tracks,
+      uri: a.uri,
+    }));
+  } catch (err) {
+    if (err.response?.status === 401 || err.response?.status === 403) {
+      accessToken = null;
+      tokenExpiry = 0;
+    }
+    throw err;
+  }
+}
+
+/**
  * Clean artist name for Spotify search.
  * Takes the primary artist from compound names like "A, B", "A feat. B", "A & B"
  */
@@ -341,6 +372,7 @@ async function getArtistImage(name) {
 
 module.exports = {
   searchTracks,
+  searchAlbums,
   searchArtists,
   getArtistImage,
   getTrack,

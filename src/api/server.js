@@ -79,11 +79,39 @@ app.get("/api/search", requireApiKey, async (req, res) => {
       uri: t.info?.uri,
       artworkUrl: t.info?.artworkUrl,
       source: t.info?.sourceName,
+      album: t.info?.albumName || t.pluginInfo?.albumName || null,
+      albumUrl: t.pluginInfo?.albumUrl || null,
     }));
 
     res.json({ query: q, source, tracks });
   } catch (err) {
     console.error("Search Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/spotify/search", requireApiKey, async (req, res) => {
+  try {
+    const q = req.query.q;
+    const limit = Math.min(parseInt(req.query.limit) || 5, 20);
+    if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
+    const tracks = await spotify.searchTracks(q, limit);
+    res.json({ query: q, tracks });
+  } catch (err) {
+    console.error("Spotify Search Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/spotify/search/albums", requireApiKey, async (req, res) => {
+  try {
+    const q = req.query.q;
+    const limit = Math.min(parseInt(req.query.limit) || 5, 20);
+    if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
+    const albums = await spotify.searchAlbums(q, limit);
+    res.json({ query: q, albums });
+  } catch (err) {
+    console.error("Spotify Album Search Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
