@@ -193,6 +193,7 @@ async function getArtistTopTracks(artistId) {
  * @property {string} isrc
  * @property {string} previewUrl
  * @property {boolean} explicit
+ * @property {string[]} genres
  */
 
 function formatTrack(track) {
@@ -208,6 +209,7 @@ function formatTrack(track) {
     isrc: track.external_ids?.isrc,
     previewUrl: track.preview_url,
     explicit: track.explicit === true,
+    genres: [],
   };
 }
 

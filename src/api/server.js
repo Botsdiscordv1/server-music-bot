@@ -97,7 +97,16 @@ app.get("/api/spotify/search", requireApiKey, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 5, 20);
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
     try {
-      const tracks = await spotify.searchTracks(q, limit);
+      let tracks = await spotify.searchTracks(q, limit);
+      const artistIds = [...new Set(tracks.map(t => t.artistId).filter(Boolean))];
+      if (artistIds.length) {
+        const artists = await spotify.getArtists(artistIds);
+        const genreMap = {};
+        for (const a of artists) {
+          if (a?.id) genreMap[a.id] = a.genres || [];
+        }
+        tracks = tracks.map(t => ({ ...t, genres: genreMap[t.artistId] || [] }));
+      }
       return res.json({ query: q, tracks, source: "spotify" });
     } catch (spotifyErr) {
       console.warn("Spotify Search failed, falling back to Deezer:", spotifyErr.message);

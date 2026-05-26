@@ -40,6 +40,7 @@ async function searchAlbums(query, limit = 5) {
 }
 
 function formatTrack(track) {
+  const genres = track.album?.genres?.data?.map(g => g.name) || [];
   return {
     id: String(track.id),
     title: track.title,
@@ -52,6 +53,7 @@ function formatTrack(track) {
     isrc: track.isrc || null,
     previewUrl: track.preview || null,
     explicit: track.explicit_lyrics === true,
+    genres,
   };
 }
 
