@@ -225,9 +225,9 @@ app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
     const userId = req.userId || req.params.userId;
     const source = req.provider || "android";
-    const { trackTitle, trackAuthor, trackUrl, trackDuration, artworkUrl, isrc, explicit } = req.body;
+    const { trackTitle, trackAuthor, trackUrl, trackDuration, artworkUrl, isrc, explicit, genres } = req.body;
     const mockTrack = {
-      info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "", explicit: explicit === true },
+      info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "", explicit: explicit === true, genres: genres || [] },
       pluginInfo: { isrc: isrc || null }
     };
     const added = await db.addLikedSong(userId, mockTrack, source);

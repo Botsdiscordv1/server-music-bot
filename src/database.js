@@ -43,6 +43,7 @@ const likedSongSchema = new mongoose.Schema({
   artworkUrl: String,
   isrc: String,
   explicit: { type: Boolean, default: false },
+  genres: { type: [String], default: [] },
   likedAt: { type: Date, default: Date.now },
 });
 likedSongSchema.index({ userId: 1, trackUrl: 1 });
@@ -306,6 +307,7 @@ async function addLikedSong(userId, track, source = "android") {
     if (exists) return false;
     const isrc = extractIsrc(track);
     const explicit = track.info.explicit === true || track.pluginInfo?.explicit === true;
+    const genres = track.info.genres || track.pluginInfo?.genres || [];
     await LikedSong.create({
       userId,
       trackTitle: track.info.title,
@@ -315,6 +317,7 @@ async function addLikedSong(userId, track, source = "android") {
       artworkUrl: track.info.artworkUrl,
       isrc: isrc || undefined,
       explicit: explicit || undefined,
+      genres: genres.length ? genres : undefined,
     });
     return true;
   } catch { return false; }
@@ -375,6 +378,7 @@ async function getLikedSongs(userId, limit = 0, source = "android") {
     artwork_url: doc.artworkUrl,
     isrc: doc.isrc,
     explicit: doc.explicit || false,
+    genres: doc.genres || [],
     liked_at: doc.likedAt,
   }));
 }
@@ -572,6 +576,7 @@ async function copyLikedSongs(fromUserId, toUserId, source = "android") {
       artworkUrl: song.artworkUrl,
       isrc: song.isrc,
       explicit: song.explicit || undefined,
+      genres: song.genres || undefined,
     }));
     await LikedSong.insertMany(docs, { ordered: false });
   }
