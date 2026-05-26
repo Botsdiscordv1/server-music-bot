@@ -48,6 +48,26 @@ likedSongSchema.index({ userId: 1, trackUrl: 1 });
 likedSongSchema.index({ userId: 1, isrc: 1 });
 likedSongSchema.index({ userId: 1, trackAuthor: 1 });
 
+const likedAlbumSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  albumId: { type: String, required: true },
+  albumName: String,
+  artistName: String,
+  artworkUrl: String,
+  albumUrl: String,
+  likedAt: { type: Date, default: Date.now },
+});
+likedAlbumSchema.index({ userId: 1, albumId: 1 }, { unique: true });
+
+const followedArtistSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  artistId: { type: String, required: true },
+  artistName: String,
+  imageUrl: String,
+  followedAt: { type: Date, default: Date.now },
+});
+followedArtistSchema.index({ userId: 1, artistId: 1 }, { unique: true });
+
 const trackPlaySchema = new mongoose.Schema({
   userId: { type: String, required: true },
   trackTitle: String,
@@ -78,6 +98,8 @@ const History = mongoose.model("History", historySchema);
 const LikedSong = mongoose.model("LikedSong", likedSongSchema);
 const TrackPlay = mongoose.model("TrackPlay", trackPlaySchema);
 const DislikedSong = mongoose.model("DislikedSong", dislikedSongSchema);
+const LikedAlbum = mongoose.model("LikedAlbum", likedAlbumSchema);
+const FollowedArtist = mongoose.model("FollowedArtist", followedArtistSchema);
 
 // ── Discord connection (separate DB) ──────────────────────────────────
 const discordUri = process.env.DISCORD_MONGODB_URI;
@@ -90,6 +112,8 @@ let DiscordHistory = null;
 let DiscordLikedSong = null;
 let DiscordTrackPlay = null;
 let DiscordDislikedSong = null;
+let DiscordLikedAlbum = null;
+let DiscordFollowedArtist = null;
 
 if (discordConn) {
   DiscordUser = discordConn.model("User", userSchema);
@@ -99,6 +123,8 @@ if (discordConn) {
   DiscordLikedSong = discordConn.model("LikedSong", likedSongSchema);
   DiscordTrackPlay = discordConn.model("TrackPlay", trackPlaySchema);
   DiscordDislikedSong = discordConn.model("DislikedSong", dislikedSongSchema);
+  DiscordLikedAlbum = discordConn.model("LikedAlbum", likedAlbumSchema);
+  DiscordFollowedArtist = discordConn.model("FollowedArtist", followedArtistSchema);
 }
 
 function getModels(source) {
@@ -110,9 +136,11 @@ function getModels(source) {
       LikedSong: DiscordLikedSong,
       TrackPlay: DiscordTrackPlay,
       DislikedSong: DiscordDislikedSong,
+      LikedAlbum: DiscordLikedAlbum,
+      FollowedArtist: DiscordFollowedArtist,
     };
   }
-  return { UserStats, Playlist, History, LikedSong, TrackPlay, DislikedSong };
+  return { UserStats, Playlist, History, LikedSong, TrackPlay, DislikedSong, LikedAlbum, FollowedArtist };
 }
 
 // ── Init DB ─────────────────────────────────────────────────────────────
@@ -418,6 +446,86 @@ async function getLikedArtists(userId, source = "android") {
     .sort((a, b) => b.count - a.count);
 }
 
+// ── Liked Albums ─────────────────────────────────────────────────────
+async function toggleLikeAlbum(userId, album, source = "android") {
+  const { LikedAlbum } = getModels(source);
+  await whenReady(() => {});
+  const existing = await LikedAlbum.findOne({ userId, albumId: album.albumId });
+  if (existing) {
+    await LikedAlbum.deleteOne({ _id: existing._id });
+    return { liked: false };
+  }
+  await LikedAlbum.create({
+    userId,
+    albumId: album.albumId,
+    albumName: album.albumName,
+    artistName: album.artistName,
+    artworkUrl: album.artworkUrl,
+    albumUrl: album.albumUrl,
+  });
+  return { liked: true };
+}
+
+async function getLikedAlbums(userId, source = "android") {
+  const { LikedAlbum } = getModels(source);
+  await whenReady(() => {});
+  const docs = await LikedAlbum.find({ userId }).sort({ likedAt: -1 }).lean();
+  return docs.map(doc => ({
+    id: doc._id.toString(),
+    albumId: doc.albumId,
+    albumName: doc.albumName,
+    artistName: doc.artistName,
+    artworkUrl: doc.artworkUrl,
+    albumUrl: doc.albumUrl,
+    likedAt: doc.likedAt,
+  }));
+}
+
+async function isAlbumLiked(userId, albumId, source = "android") {
+  const { LikedAlbum } = getModels(source);
+  await whenReady(() => {});
+  const found = await LikedAlbum.findOne({ userId, albumId }).lean();
+  return !!found;
+}
+
+// ── Followed Artists ─────────────────────────────────────────────────
+async function toggleFollowArtist(userId, artist, source = "android") {
+  const { FollowedArtist } = getModels(source);
+  await whenReady(() => {});
+  const existing = await FollowedArtist.findOne({ userId, artistId: artist.artistId });
+  if (existing) {
+    await FollowedArtist.deleteOne({ _id: existing._id });
+    return { followed: false };
+  }
+  await FollowedArtist.create({
+    userId,
+    artistId: artist.artistId,
+    artistName: artist.artistName,
+    imageUrl: artist.imageUrl,
+  });
+  return { followed: true };
+}
+
+async function getFollowedArtists(userId, source = "android") {
+  const { FollowedArtist } = getModels(source);
+  await whenReady(() => {});
+  const docs = await FollowedArtist.find({ userId }).sort({ followedAt: -1 }).lean();
+  return docs.map(doc => ({
+    id: doc._id.toString(),
+    artistId: doc.artistId,
+    artistName: doc.artistName,
+    imageUrl: doc.imageUrl,
+    followedAt: doc.followedAt,
+  }));
+}
+
+async function isArtistFollowed(userId, artistId, source = "android") {
+  const { FollowedArtist } = getModels(source);
+  await whenReady(() => {});
+  const found = await FollowedArtist.findOne({ userId, artistId }).lean();
+  return !!found;
+}
+
 async function incrementTrackPlay(userId, trackTitle, trackAuthor, trackUrl, source = "android") {
   const { TrackPlay } = getModels(source);
   await whenReady(() => {});
@@ -553,6 +661,12 @@ module.exports = {
   isSongInLikes,
   extractIsrc,
   getLikedArtists,
+  toggleLikeAlbum,
+  getLikedAlbums,
+  isAlbumLiked,
+  toggleFollowArtist,
+  getFollowedArtists,
+  isArtistFollowed,
   incrementTrackPlay,
   getMostPlayedTracks,
   copyLikedSongs,

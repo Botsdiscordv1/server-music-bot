@@ -241,6 +241,88 @@ app.delete("/api/likes/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+// ── Liked Albums ─────────────────────────────────────────────────────
+app.get("/api/albums/liked", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const albums = await db.getLikedAlbums(userId, source);
+    res.json({ albums });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/albums/like", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const { albumId, albumName, artistName, artworkUrl, albumUrl } = req.body;
+    if (!albumId) return res.status(400).json({ error: "albumId is required" });
+    const result = await db.toggleLikeAlbum(userId, { albumId, albumName, artistName, artworkUrl, albumUrl }, source);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/albums/liked/check", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const { albumId } = req.query;
+    if (!albumId) return res.status(400).json({ error: "albumId query param is required" });
+    const liked = await db.isAlbumLiked(userId, albumId, source);
+    res.json({ liked });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Followed Artists ─────────────────────────────────────────────────
+app.get("/api/artists/followed", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const artists = await db.getFollowedArtists(userId, source);
+    res.json({ artists });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/artists/follow", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const { artistId, artistName, imageUrl } = req.body;
+    if (!artistId) return res.status(400).json({ error: "artistId is required" });
+    const result = await db.toggleFollowArtist(userId, { artistId, artistName, imageUrl }, source);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/artists/followed/check", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const { artistId } = req.query;
+    if (!artistId) return res.status(400).json({ error: "artistId query param is required" });
+    const followed = await db.isArtistFollowed(userId, artistId, source);
+    res.json({ followed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/stats/:userId", requireApiKey, async (req, res) => {
   try {
     const userId = req.userId || req.params.userId;
