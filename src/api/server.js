@@ -10,6 +10,7 @@ const db = require("../database");
 const { DiscordUser } = db;
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
+const deezer = require("../services/deezer");
 const axios = require("axios");
 const play = require("play-dl");
 
@@ -95,10 +96,16 @@ app.get("/api/spotify/search", requireApiKey, async (req, res) => {
     const q = req.query.q;
     const limit = Math.min(parseInt(req.query.limit) || 5, 20);
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
-    const tracks = await spotify.searchTracks(q, limit);
-    res.json({ query: q, tracks });
+    try {
+      const tracks = await spotify.searchTracks(q, limit);
+      return res.json({ query: q, tracks, source: "spotify" });
+    } catch (spotifyErr) {
+      console.warn("Spotify Search failed, falling back to Deezer:", spotifyErr.message);
+      const tracks = await deezer.searchTracks(q, limit);
+      res.json({ query: q, tracks, source: "deezer" });
+    }
   } catch (err) {
-    console.error("Spotify Search Error:", err.message);
+    console.error("All Search Sources Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -108,10 +115,16 @@ app.get("/api/spotify/search/albums", requireApiKey, async (req, res) => {
     const q = req.query.q;
     const limit = Math.min(parseInt(req.query.limit) || 5, 20);
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
-    const albums = await spotify.searchAlbums(q, limit);
-    res.json({ query: q, albums });
+    try {
+      const albums = await spotify.searchAlbums(q, limit);
+      return res.json({ query: q, albums, source: "spotify" });
+    } catch (spotifyErr) {
+      console.warn("Spotify Album Search failed, falling back to Deezer:", spotifyErr.message);
+      const albums = await deezer.searchAlbums(q, limit);
+      res.json({ query: q, albums, source: "deezer" });
+    }
   } catch (err) {
-    console.error("Spotify Album Search Error:", err.message);
+    console.error("All Album Search Sources Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
