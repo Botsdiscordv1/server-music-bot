@@ -42,6 +42,7 @@ const likedSongSchema = new mongoose.Schema({
   trackDuration: Number,
   artworkUrl: String,
   isrc: String,
+  explicit: { type: Boolean, default: false },
   likedAt: { type: Date, default: Date.now },
 });
 likedSongSchema.index({ userId: 1, trackUrl: 1 });
@@ -304,6 +305,7 @@ async function addLikedSong(userId, track, source = "android") {
     const exists = await LikedSong.findOne({ userId, trackUrl: track.info.uri });
     if (exists) return false;
     const isrc = extractIsrc(track);
+    const explicit = track.info.explicit === true || track.pluginInfo?.explicit === true;
     await LikedSong.create({
       userId,
       trackTitle: track.info.title,
@@ -312,6 +314,7 @@ async function addLikedSong(userId, track, source = "android") {
       trackDuration: track.info.duration,
       artworkUrl: track.info.artworkUrl,
       isrc: isrc || undefined,
+      explicit: explicit || undefined,
     });
     return true;
   } catch { return false; }
@@ -371,6 +374,7 @@ async function getLikedSongs(userId, limit = 0, source = "android") {
     track_duration: doc.trackDuration,
     artwork_url: doc.artworkUrl,
     isrc: doc.isrc,
+    explicit: doc.explicit || false,
     liked_at: doc.likedAt,
   }));
 }
@@ -567,6 +571,7 @@ async function copyLikedSongs(fromUserId, toUserId, source = "android") {
       trackDuration: song.trackDuration,
       artworkUrl: song.artworkUrl,
       isrc: song.isrc,
+      explicit: song.explicit || undefined,
     }));
     await LikedSong.insertMany(docs, { ordered: false });
   }

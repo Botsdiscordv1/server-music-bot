@@ -51,6 +51,7 @@ function formatTrack(track) {
     uri: `deezer:track:${track.id}`,
     isrc: track.isrc || null,
     previewUrl: track.preview || null,
+    explicit: track.explicit_lyrics === true,
   };
 }
 

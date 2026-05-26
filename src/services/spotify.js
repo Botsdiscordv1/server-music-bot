@@ -192,6 +192,7 @@ async function getArtistTopTracks(artistId) {
  * @property {string} uri        - spotify:track:xxx
  * @property {string} isrc
  * @property {string} previewUrl
+ * @property {boolean} explicit
  */
 
 function formatTrack(track) {
@@ -206,6 +207,7 @@ function formatTrack(track) {
     uri: track.uri,
     isrc: track.external_ids?.isrc,
     previewUrl: track.preview_url,
+    explicit: track.explicit === true,
   };
 }
 
