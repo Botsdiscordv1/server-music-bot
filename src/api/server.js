@@ -328,7 +328,7 @@ app.post("/api/warm", requireApiKey, async (req, res) => {
 
     setImmediate(() => {
       const queue = validIds.slice();
-      const workers = Array.from({ length: Math.min(WARM_CONCURRENCE, queue.length) }, async () => {
+      const workers = Array.from({ length: Math.min(WARM_CONCURRENCY, queue.length) }, async () => {
         while (queue.length > 0) {
           const id = queue.shift();
           try { await resolveStreamUrl(id); } catch (e) {}
