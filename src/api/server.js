@@ -21,31 +21,28 @@ const fs = require("fs");
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
 
-// ── Auto-detectar navegador para cookies ──────────────────────────────
-function detectBrowser() {
-  const candidates = [
-    { name: "chrome",  paths: [process.env.LOCALAPPDATA + "\\Google\\Chrome\\User Data\\Default\\Network\\Cookies"] },
-    { name: "edge",    paths: [process.env.LOCALAPPDATA + "\\Microsoft\\Edge\\User Data\\Default\\Network\\Cookies"] },
-    { name: "brave",   paths: [process.env.LOCALAPPDATA + "\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Network\\Cookies"] },
-    { name: "firefox", paths: [process.env.APPDATA + "\\Mozilla\\Firefox\\Profiles"] },
-    { name: "opera",   paths: [process.env.APPDATA + "\\Opera Software\\Opera Stable\\Network\\Cookies"] },
+// ── Navegadores disponibles (ordenados por preferencia) ───────────────
+function getAvailableBrowsers() {
+  const checks = [
+    { name: "chrome",  path: process.env.LOCALAPPDATA + "\\Google\\Chrome\\User Data\\Default\\Network\\Cookies" },
+    { name: "edge",    path: process.env.LOCALAPPDATA + "\\Microsoft\\Edge\\User Data\\Default\\Network\\Cookies" },
+    { name: "brave",   path: process.env.LOCALAPPDATA + "\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Network\\Cookies" },
+    { name: "firefox", path: process.env.APPDATA + "\\Mozilla\\Firefox\\Profiles" },
+    { name: "opera",   path: process.env.APPDATA + "\\Opera Software\\Opera Stable\\Network\\Cookies" },
   ];
-  for (const b of candidates) {
-    if (b.name === "firefox") {
-      if (fs.existsSync(b.paths[0])) {
-        // Firefox uses profiles folder, pick the first default-release
-        const profiles = fs.readdirSync(b.paths[0]).filter(p => p.endsWith(".default-release") || p.endsWith(".default"));
-        if (profiles.length > 0) return "firefox";
+  return checks.filter(b => {
+    try {
+      if (b.name === "firefox") {
+        if (!fs.existsSync(b.path)) return false;
+        return fs.readdirSync(b.path).some(p => p.endsWith(".default-release") || p.endsWith(".default"));
       }
-    } else if (b.paths.some(p => fs.existsSync(p))) {
-      return b.name;
-    }
-  }
-  // También probar via `where` en Linux/macOS
-  return null;
+      return fs.existsSync(b.path);
+    } catch { return false; }
+  }).map(b => b.name);
 }
 
-const detectedBrowser = detectBrowser();
+const availableBrowsers = getAvailableBrowsers();
+
 const YTDLP_BASE_ARGS = [
   "-f", "bestaudio[ext=m4a]/bestaudio",
   "-g",
@@ -55,25 +52,42 @@ const YTDLP_BASE_ARGS = [
   "--extractor-retries", "2",
 ];
 
-if (detectedBrowser) {
-  YTDLP_BASE_ARGS.push("--cookies-from-browser", detectedBrowser);
-  console.log(`[yt-dlp] usando cookies de ${detectedBrowser}`);
+if (availableBrowsers.length > 0) {
+  console.log(`[yt-dlp] navegadores detectados: ${availableBrowsers.join(", ")}`);
 } else {
-  console.log("[yt-dlp] sin cookies — puede haber bloqueos");
+  console.log("[yt-dlp] sin navegador detectado — puede haber bloqueos");
 }
 
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(YTDLP_PATH, [videoUrl, ...YTDLP_BASE_ARGS], { timeout: 30000 });
-    let stdout = "", stderr = "";
-    proc.stdout.on("data", d => stdout += d);
-    proc.stderr.on("data", d => stderr += d);
-    proc.on("close", code => {
-      const url = stdout.toString().trim();
-      if (code === 0 && url) resolve(url);
-      else reject(new Error(stderr || `Exit code ${code}`));
-    });
-    proc.on("error", reject);
+    // Probar cada navegador, caer al siguiente si falla DPAPI
+    const tryBrowser = (index) => {
+      const args = [...YTDLP_BASE_ARGS];
+      if (index < availableBrowsers.length) {
+        args.push("--cookies-from-browser", availableBrowsers[index]);
+      }
+      const proc = spawn(YTDLP_PATH, [videoUrl, ...args], { timeout: 30000 });
+      let stdout = "", stderr = "";
+      proc.stdout.on("data", d => stdout += d);
+      proc.stderr.on("data", d => stderr += d);
+      proc.on("close", code => {
+        const url = stdout.toString().trim();
+        if (code === 0 && url) {
+          resolve(url);
+          return;
+        }
+        const err = stderr || `Exit code ${code}`;
+        // Si es error DPAPI, probar siguiente navegador
+        if (err.includes("DPAPI") && index + 1 < availableBrowsers.length) {
+          console.warn(`[yt-dlp] ${availableBrowsers[index]} bloqueado (DPAPI), probando ${availableBrowsers[index + 1]}...`);
+          tryBrowser(index + 1);
+        } else {
+          reject(new Error(err));
+        }
+      });
+      proc.on("error", reject);
+    };
+    tryBrowser(0);
   });
 }
 
@@ -312,15 +326,15 @@ app.post("/api/warm", requireApiKey, async (req, res) => {
     const validIds = ids.filter(id => id && id !== "undefined" && id !== "null" && id.trim() !== "");
     res.json({ warmed: validIds.length });
 
-    setImmediate(async () => {
+    setImmediate(() => {
       const queue = validIds.slice();
-      const workers = Array.from({ length: Math.min(WARM_CONCURRENCY, queue.length) }, async () => {
+      const workers = Array.from({ length: Math.min(WARM_CONCURRENCE, queue.length) }, async () => {
         while (queue.length > 0) {
           const id = queue.shift();
           try { await resolveStreamUrl(id); } catch (e) {}
         }
       });
-      await Promise.all(workers);
+      Promise.all(workers).catch(() => {});
     });
   } catch (err) {
     console.error("Warm Error:", err.message);
