@@ -198,15 +198,19 @@ const { getCached, setCached } = (() => {
       const e = mem.get(key);
       if (!e) return null;
 
-      // Si la URL contiene un parámetro de expiración (como las de YouTube)
-      if (e.url && e.url.includes("expire=")) {
+      // YouTube/Cobalt check
+      if (e.url) {
         try {
           const decoded = e.url.includes("%") ? decodeURIComponent(e.url) : e.url;
-          const match = decoded.match(/[?&]expire=(\d+)/);
-          if (match) {
-            const expireSec = parseInt(match[1], 10);
+          // Expire in seconds (YouTube) or milliseconds (Cobalt exp= parameter)
+          const matchSec = decoded.match(/[?&]expire=(\d+)/);
+          const matchMs = decoded.match(/[?&]exp=(\d+)/);
+          
+          if (matchSec || matchMs) {
+            const expire = matchSec ? parseInt(matchSec[1], 10) : Math.floor(parseInt(matchMs[1], 10) / 1000);
             const nowSec = Math.floor(Date.now() / 1000);
-            if (nowSec >= expireSec - 600) {
+            // Si falta menos de 10 minutos (600s), invalidar
+            if (nowSec >= expire - 600) {
               mem.delete(key);
               return null;
             }
@@ -215,9 +219,9 @@ const { getCached, setCached } = (() => {
         } catch (err) {}
       }
 
-      // Tiempo de vida por defecto para otros tipos de URL (7 días)
-      const isValid = Date.now() - e.ts < 7 * 24 * 60 * 60 * 1000;
-      if (!isValid) {
+      // TTL para Cobalt (evitar caché eterno) o general
+      const ttl = e.url?.includes("cobalt") ? 1 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      if (Date.now() - e.ts > ttl) {
         mem.delete(key);
         return null;
       }
@@ -276,9 +280,10 @@ async function extractVideoIdFromLavalink(input) {
 const failedVideoIds = new Map();
 setInterval(() => {
   for (const [id, ts] of failedVideoIds) {
-    if (Date.now() - ts > 3600_000) failedVideoIds.delete(id);
+    // Reducido de 1 hora a 5 minutos: errores transitorios (Cobalt, red) no bloquean indefinidamente
+    if (Date.now() - ts > 5 * 60_000) failedVideoIds.delete(id);
   }
-}, 600_000); // limpiar cada 10 min en lugar de cada 1 min
+}, 60_000); // limpiar cada 60 segundos
 
 let streamQueuePromise = Promise.resolve();
 
