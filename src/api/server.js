@@ -10,7 +10,7 @@ const db = require("../database");
 const { DiscordUser } = db;
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
-const deezer = require("../services/deezer");
+
 const axios = require("axios");
 const play = require("play-dl");
 
@@ -253,43 +253,49 @@ app.get("/api/search", requireApiKey, async (req, res) => {
       return res.json(cached.data);
     }
 
-    const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(cacheKey)}`;
-    const response = await axios.get(url, {
-      headers: { Authorization: LAVALINK_AUTH },
-      timeout: 15000,
-    });
-
-    const tracks = (response.data?.data || []).map(t => ({
-      encoded: t.encoded,
-      title: t.info?.title,
-      author: t.info?.author,
-      duration: t.info?.duration,
-      uri: t.info?.uri,
-      artworkUrl: t.info?.artworkUrl,
-      source: t.info?.sourceName,
-      album: t.info?.albumName || t.pluginInfo?.albumName || null,
-      albumUrl: t.pluginInfo?.albumUrl || null,
-    }));
+    const tracks = await searchLavalink(source, q);
+    if (!tracks.length) return res.json({ query: q, source, tracks: [] });
 
     const result = { query: q, source, tracks };
     searchCache.set(cacheKey, { data: result, ts: Date.now() });
     res.json(result);
 
     // Pre-resolver streams en background
-    if (tracks.length > 0) {
-      setImmediate(async () => {
-        for (const track of tracks.slice(0, 3)) {
-          if (track.uri) {
-            try { await resolveStreamUrl(track.uri, req); } catch (e) {}
-          }
+    setImmediate(async () => {
+      for (const track of tracks.slice(0, 3)) {
+        if (track.uri) {
+          try { await resolveStreamUrl(track.uri, req); } catch (e) {}
         }
-      });
-    }
+      }
+    });
   } catch (err) {
     console.error("Search Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+async function searchLavalink(source, query) {
+  const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(source + ":" + query)}`;
+  const response = await axios.get(url, {
+    headers: { Authorization: LAVALINK_AUTH },
+    timeout: 15000,
+  });
+  return (response.data?.data || []).map(t => ({
+    id: t.info?.identifier,
+    encoded: t.encoded,
+    title: t.info?.title,
+    artist: t.info?.author,
+    author: t.info?.author,
+    duration: t.info?.duration,
+    uri: t.info?.uri,
+    artworkUrl: t.info?.artworkUrl,
+    source: t.info?.sourceName,
+    album: t.info?.albumName || t.pluginInfo?.albumName || null,
+    albumUrl: t.pluginInfo?.albumUrl || null,
+    isrc: t.info?.isrc || t.pluginInfo?.isrc || null,
+    explicit: t.info?.explicit === true,
+  }));
+}
 
 app.get("/api/spotify/search", requireApiKey, async (req, res) => {
   try {
@@ -309,9 +315,9 @@ app.get("/api/spotify/search", requireApiKey, async (req, res) => {
       }
       return res.json({ query: q, tracks, source: "spotify" });
     } catch (spotifyErr) {
-      console.warn("Spotify Search failed, falling back to Deezer:", spotifyErr.message);
-      const tracks = await deezer.searchTracks(q, limit);
-      res.json({ query: q, tracks, source: "deezer" });
+      console.warn("Spotify Search failed, falling back to YouTube Music:", spotifyErr.message);
+      const tracks = await searchLavalink("ytmsearch", q);
+      res.json({ query: q, tracks, source: "youtube" });
     }
   } catch (err) {
     console.error("All Search Sources Error:", err.message);
@@ -328,9 +334,23 @@ app.get("/api/spotify/search/albums", requireApiKey, async (req, res) => {
       const albums = await spotify.searchAlbums(q, limit);
       return res.json({ query: q, albums, source: "spotify" });
     } catch (spotifyErr) {
-      console.warn("Spotify Album Search failed, falling back to Deezer:", spotifyErr.message);
-      const albums = await deezer.searchAlbums(q, limit);
-      res.json({ query: q, albums, source: "deezer" });
+      console.warn("Spotify Album Search failed, falling back to YouTube Music:", spotifyErr.message);
+      const tracks = await searchLavalink("ytmsearch", q);
+      const albumMap = {};
+      for (const t of tracks) {
+        const key = t.album || "Unknown";
+        if (!albumMap[key] && Object.keys(albumMap).length < limit) {
+          albumMap[key] = {
+            id: t.id,
+            name: t.album || "Unknown",
+            artists: t.artist || "Unknown",
+            image: t.artworkUrl || null,
+            totalTracks: 0,
+            uri: t.uri || t.encoded,
+          };
+        }
+      }
+      res.json({ query: q, albums: Object.values(albumMap), source: "youtube" });
     }
   } catch (err) {
     console.error("All Album Search Sources Error:", err.message);
