@@ -138,14 +138,20 @@ async function extractVideoIdFromLavalink(input) {
   }
 }
 
-async function resolveStreamUrl(identifier) {
+async function resolveStreamUrl(identifier, req = null) {
   if (!identifier || typeof identifier !== "string") return null;
 
-  // Si ya es URL de audio directa (Deezer, etc.), cachear y devolver
+  // URL de audio directa (Deezer, etc.) → proxylar por el backend
   if (/^https?:\/\/.+\.(mp3|m4a|ogg|wav|flac|opus)(\?|$)/i.test(identifier)) {
-    const hash = identifier.slice(0, 40);
+    const hash = "proxy:" + identifier.slice(0, 40);
     const cached = getCached(hash);
     if (cached) return cached;
+    if (req) {
+      const proxyUrl = `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(identifier)}`;
+      setCached(hash, proxyUrl);
+      return proxyUrl;
+    }
+    // Sin req (warm en background), devolver directo
     setCached(hash, identifier);
     return identifier;
   }
@@ -214,6 +220,26 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", service: "music-api", extractor: "yt-dlp (android client)" });
 });
 
+// Proxy de audio (Deezer, etc.) — añade headers que el reproductor nativo no manda
+app.get("/api/proxy/audio", async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).json({ error: "Missing url" });
+  try {
+    const response = await axios.get(targetUrl, {
+      responseType: "stream",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Referer": "https://deezer.com/",
+      },
+      timeout: 15000,
+    });
+    res.set("Content-Type", response.headers["content-type"] || "audio/mpeg");
+    response.data.pipe(res);
+  } catch (e) {
+    res.status(502).json({ error: "Proxy fetch failed: " + (e.message || e) });
+  }
+});
+
 app.get("/api/search", requireApiKey, async (req, res) => {
   try {
     const q = req.query.q;
@@ -253,7 +279,7 @@ app.get("/api/search", requireApiKey, async (req, res) => {
       setImmediate(async () => {
         for (const track of tracks.slice(0, 3)) {
           if (track.uri) {
-            try { await resolveStreamUrl(track.uri); } catch (e) {}
+            try { await resolveStreamUrl(track.uri, req); } catch (e) {}
           }
         }
       });
@@ -328,7 +354,7 @@ app.post("/api/warm", requireApiKey, async (req, res) => {
       const workers = Array.from({ length: Math.min(WARM_CONCURRENCY, queue.length) }, async () => {
         while (queue.length > 0) {
           const id = queue.shift();
-          try { await resolveStreamUrl(id); } catch (e) {}
+          try { await resolveStreamUrl(id, req); } catch (e) {}
         }
       });
       Promise.all(workers).catch(() => {});
@@ -346,7 +372,7 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid 'id' parameter" });
     }
 
-    const streamUrl = await resolveStreamUrl(id);
+    const streamUrl = await resolveStreamUrl(id, req);
     if (streamUrl) return res.json({ url: streamUrl });
 
     res.status(404).json({ error: "No stream found after fallback" });
