@@ -250,10 +250,19 @@ app.get("/api/proxy/audio", async (req, res) => {
   }
 });
 
+const SOURCE_MAP = {
+  deezer: "ytmsearch",
+  spotify: "ytmsearch",
+  youtube: "ytmsearch",
+  ytmsearch: "ytmsearch",
+  ytsearch: "ytsearch",
+  soundcloud: "scsearch",
+};
+
 app.get("/api/search", requireApiKey, async (req, res) => {
   try {
     const q = req.query.q;
-    const source = req.query.source || "ytmsearch";
+    const source = SOURCE_MAP[req.query.source] || "ytmsearch";
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
 
     const cacheKey = `${source}:${q}`;
