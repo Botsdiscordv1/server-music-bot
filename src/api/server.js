@@ -22,7 +22,7 @@ const fs = require("fs");
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
 
-const YT_CLIENTS = ["ios", "android", "web"];
+const YT_CLIENTS = ["web", "android", "ios"];
 
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
