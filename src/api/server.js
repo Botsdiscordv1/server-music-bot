@@ -222,6 +222,34 @@ app.get("/api/spotify/search/albums", requireApiKey, async (req, res) => {
   }
 });
 
+const WARM_CONCURRENCY = 3;
+
+app.post("/api/warm", requireApiKey, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "Missing or empty 'ids' array" });
+    }
+
+    const validIds = ids.filter(id => id && id !== "undefined" && id !== "null" && id.trim() !== "");
+    res.json({ warmed: validIds.length });
+
+    setImmediate(async () => {
+      const queue = validIds.slice();
+      const workers = Array.from({ length: Math.min(WARM_CONCURRENCY, queue.length) }, async () => {
+        while (queue.length > 0) {
+          const id = queue.shift();
+          try { await resolveStreamUrl(id); } catch (e) {}
+        }
+      });
+      await Promise.all(workers);
+    });
+  } catch (err) {
+    console.error("Warm Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
     const { id } = req.query;
