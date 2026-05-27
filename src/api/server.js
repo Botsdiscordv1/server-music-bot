@@ -20,19 +20,43 @@ const fs = require("fs");
 
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
-const CACHE_DIR = path.join(__dirname, "..", "..", ".ytdlp-cache");
+const COOKIES_PATH = path.join(__dirname, "..", "..", "cookies.txt");
 
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+// ── Cookies ──────────────────────────────────────────────────────────
+let cookiesActive = false;
+function loadCookies() {
+  if (!fs.existsSync(COOKIES_PATH)) {
+    console.log("[cookies] no cookies.txt found — extractor sin autenticar");
+    return;
+  }
+  try {
+    const raw = fs.readFileSync(COOKIES_PATH, "utf8");
 
+    // Pasar cookies a yt-dlp (vía flag --cookies)
+    // Pasar cookies a play-dl (vía setToken)
+    play.setToken({
+      youtube: { cookie: raw },
+    });
+
+    cookiesActive = true;
+    console.log("[cookies] cookies.txt cargadas — extractor autenticado");
+  } catch (e) {
+    console.warn("[cookies] error al cargar cookies.txt:", e.message);
+  }
+}
+loadCookies();
+
+// ── yt-dlp extractor ─────────────────────────────────────────────────
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(YTDLP_PATH, [
+    const args = [
       videoUrl,
       "-f", "bestaudio[ext=m4a]/bestaudio",
       "-g",
       "--no-warnings",
-      "--cache-dir", CACHE_DIR,
-    ], { timeout: 30000 });
+    ];
+    if (cookiesActive) args.push("--cookies", COOKIES_PATH);
+    const proc = spawn(YTDLP_PATH, args, { timeout: 30000 });
     let stdout = "", stderr = "";
     proc.stdout.on("data", d => stdout += d);
     proc.stderr.on("data", d => stderr += d);
@@ -114,11 +138,9 @@ async function resolveStreamUrl(identifier) {
   const cached = getCached(videoId);
   if (cached) return cached;
 
-  const url = `https://www.youtube.com/watch?v=${videoId}`;
-
-  // 1) Try yt-dlp (fast direct URL, no transcoding overhead)
+  // 1) yt-dlp (child process, ~5-15s en frío pero confiable)
   try {
-    const streamUrl = await ytDlpGetUrl(url);
+    const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`);
     if (streamUrl) {
       setCached(videoId, streamUrl);
       return streamUrl;
@@ -129,7 +151,7 @@ async function resolveStreamUrl(identifier) {
 
   // 2) Fallback: play-dl
   try {
-    const info = await play.video_info(url).catch(async () => {
+    const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
       const search = await play.search(videoId, { limit: 1 });
       return search[0] ? await play.video_info(search[0].url) : null;
     });

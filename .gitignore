@@ -5,3 +5,6 @@ lavalink/Lavalink.jar
 lavalink/logs/
 lavalink/cache/
 data.db
+cookies.txt
+stream-cache.json
+.ytdlp-cache/
