@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node --max-old-space-size=350 src/index.js",
-    "dev": "node --watch src/index.js"
+    "start": "node --max-old-space-size=300 --expose-gc src/index.js",
+    "dev": "node --watch --expose-gc src/index.js"
   },
   "dependencies": {
     "@distube/yt-dlp": "^2.0.1",

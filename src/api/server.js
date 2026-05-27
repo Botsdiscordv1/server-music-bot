@@ -57,29 +57,42 @@ function ytDlpGetUrl(videoUrl) {
   });
 }
 
+const STREAM_CACHE_MAX = 200;
+const IS_RENDER = !!process.env.RENDER;
+
 const { getCached, setCached } = (() => {
   const DB_PATH = path.join(__dirname, "..", "..", "stream-cache.json");
 
   function loadDisk() {
+    if (IS_RENDER) return {}; // Render tiene FS efímero, no vale la pena
     try { return JSON.parse(fs.readFileSync(DB_PATH, "utf8")); }
     catch { return {}; }
   }
 
   function saveDisk(data) {
-    fs.writeFileSync(DB_PATH, JSON.stringify(data), "utf8");
+    if (IS_RENDER) return;
+    try { fs.writeFileSync(DB_PATH, JSON.stringify(data), "utf8"); } catch {}
   }
 
   const disk = loadDisk();
   const mem = new Map();
 
-  // Migrate disk → mem on startup
-  for (const [k, v] of Object.entries(disk)) {
-    if (Date.now() - v.ts < 7 * 24 * 60 * 60 * 1000) mem.set(k, v);
-  }
+  // Migrate disk → mem on startup, mantener solo las más recientes
+  const validEntries = Object.entries(disk)
+    .filter(([, v]) => Date.now() - v.ts < 7 * 24 * 60 * 60 * 1000)
+    .sort((a, b) => b[1].ts - a[1].ts)
+    .slice(0, STREAM_CACHE_MAX);
+  for (const [k, v] of validEntries) mem.set(k, v);
   if (Object.keys(disk).length !== mem.size) saveDisk(Object.fromEntries(mem));
 
-  // Flush to disk every 30s
-  setInterval(() => { saveDisk(Object.fromEntries(mem)); }, 30_000);
+  function evictLRU() {
+    if (mem.size <= STREAM_CACHE_MAX) return;
+    const sorted = [...mem.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    for (let i = 0; i < sorted.length - STREAM_CACHE_MAX; i++) mem.delete(sorted[i][0]);
+  }
+
+  // Flush to disk every 60s (solo en local)
+  if (!IS_RENDER) setInterval(() => { saveDisk(Object.fromEntries(mem)); }, 60_000);
 
   return {
     getCached: (key) => {
@@ -93,7 +106,6 @@ const { getCached, setCached } = (() => {
           const expireSec = parseInt(urlObj.searchParams.get("expire"));
           if (expireSec) {
             const nowSec = Math.floor(Date.now() / 1000);
-            // Si ya expiró o está a menos de 10 minutos de expirar, la descartamos
             if (nowSec >= expireSec - 600) {
               mem.delete(key);
               return null;
@@ -113,13 +125,14 @@ const { getCached, setCached } = (() => {
     },
     setCached: (key, url) => {
       mem.set(key, { url, ts: Date.now() });
+      evictLRU();
     },
   };
 })();
 
 const searchCache = new Map();
-const SEARCH_CACHE_TTL = 10 * 60 * 1000;
-const SEARCH_CACHE_MAX = 200;
+const SEARCH_CACHE_TTL = 5 * 60 * 1000;  // 5 min
+const SEARCH_CACHE_MAX = 50;              // máx 50 búsquedas
 function cleanCache(cache, ttl, max) {
   const now = Date.now();
   for (const [key, entry] of cache) {
@@ -165,7 +178,7 @@ setInterval(() => {
   for (const [id, ts] of failedVideoIds) {
     if (Date.now() - ts > 3600_000) failedVideoIds.delete(id);
   }
-}, 60_000);
+}, 600_000); // limpiar cada 10 min en lugar de cada 1 min
 
 async function resolveStreamUrl(identifier, req = null) {
   if (!identifier || typeof identifier !== "string") return null;
