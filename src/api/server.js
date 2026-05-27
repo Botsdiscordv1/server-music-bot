@@ -30,7 +30,7 @@ function ytDlpGetUrl(videoUrl) {
       const client = YT_CLIENTS[idx];
       const args = [
         videoUrl,
-        "-f", "bestaudio[ext=m4a]/bestaudio",
+        "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "-g",
         "--no-warnings",
         "--extractor-args", `youtube:player_client=${client};skip=webpage;include_dash_manifest=false;player_skip=webpage,configs`,
