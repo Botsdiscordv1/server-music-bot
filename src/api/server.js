@@ -22,19 +22,18 @@ const fs = require("fs");
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
 
-const YT_CLIENTS = ["web", "android", "ios"];
+const YT_CLIENTS = ["android", "ios"];
 
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
     const tryClient = (idx) => {
+      const client = YT_CLIENTS[idx];
       const args = [
         videoUrl,
         "-f", "bestaudio[ext=m4a]/bestaudio",
         "-g",
         "--no-warnings",
-        "--extractor-args", `youtube:player_client=${YT_CLIENTS[idx]}`,
-        "--extractor-args", "youtube:skip=webpage",
-        "--extractor-args", "youtube:include_dash_manifest=false",
+        "--extractor-args", `youtube:player_client=${client};skip=webpage;include_dash_manifest=false;player_skip=webpage,configs`,
         "--extractor-retries", "2",
         "--sleep-requests", "0.5",
         "--sleep-interval", "1",
@@ -138,6 +137,13 @@ async function extractVideoIdFromLavalink(input) {
   }
 }
 
+const failedVideoIds = new Map();
+setInterval(() => {
+  for (const [id, ts] of failedVideoIds) {
+    if (Date.now() - ts > 3600_000) failedVideoIds.delete(id);
+  }
+}, 60_000);
+
 async function resolveStreamUrl(identifier, req = null) {
   if (!identifier || typeof identifier !== "string") return null;
 
@@ -159,6 +165,8 @@ async function resolveStreamUrl(identifier, req = null) {
   let videoId = extractVideoId(identifier);
   if (!videoId) videoId = await extractVideoIdFromLavalink(identifier);
   if (!videoId) return null;
+
+  if (failedVideoIds.has(videoId)) return null;
 
   const cached = getCached(videoId);
   if (cached) return cached;
@@ -191,6 +199,7 @@ async function resolveStreamUrl(identifier, req = null) {
     console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
   }
 
+  failedVideoIds.set(videoId, Date.now());
   return null;
 }
 
