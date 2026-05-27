@@ -207,10 +207,13 @@ const { getCached, setCached } = (() => {
           const matchMs = decoded.match(/[?&]exp=(\d+)/);
           
           if (matchSec || matchMs) {
+            const isCobalt = !!matchMs;
             const expire = matchSec ? parseInt(matchSec[1], 10) : Math.floor(parseInt(matchMs[1], 10) / 1000);
             const nowSec = Math.floor(Date.now() / 1000);
-            // Si falta menos de 10 minutos (600s), invalidar
-            if (nowSec >= expire - 600) {
+            // Si es Cobalt (vida útil corta de 5 min), invalidar si expira en menos de 1 minuto (60s)
+            // Si es YouTube (vida útil de 6h), invalidar si expira en menos de 10 minutos (600s)
+            const margin = isCobalt ? 60 : 600;
+            if (nowSec >= expire - margin) {
               mem.delete(key);
               return null;
             }
@@ -287,14 +290,16 @@ setInterval(() => {
 
 let streamQueuePromise = Promise.resolve();
 
-async function resolveStreamUrl(identifier, req = null) {
+async function resolveStreamUrl(identifier, req = null, forceRefresh = false) {
   if (!identifier || typeof identifier !== "string") return null;
 
   // URL de audio directa (Deezer, etc.) → proxylar por el backend
   if (/^https?:\/\/.+\.(mp3|m4a|ogg|wav|flac|opus)(\?|$)/i.test(identifier)) {
     const hash = "proxy:" + identifier.slice(0, 40);
-    const cached = getCached(hash);
-    if (cached) return cached;
+    if (!forceRefresh) {
+      const cached = getCached(hash);
+      if (cached) return cached;
+    }
     if (req) {
       const proxyUrl = `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(identifier)}`;
       setCached(hash, proxyUrl);
@@ -309,19 +314,27 @@ async function resolveStreamUrl(identifier, req = null) {
   if (!videoId) videoId = await extractVideoIdFromLavalink(identifier);
   if (!videoId) return null;
 
-  if (failedVideoIds.has(videoId)) return null;
+  if (forceRefresh) {
+    failedVideoIds.delete(videoId);
+  } else if (failedVideoIds.has(videoId)) {
+    return null;
+  }
 
-  const cached = getCached(videoId);
-  if (cached) return cached;
+  if (!forceRefresh) {
+    const cached = getCached(videoId);
+    if (cached) return cached;
+  }
 
   // Encolar la resolución para garantizar que nunca se ejecuten procesos concurrentes de yt-dlp/play-dl
   return new Promise((resolve) => {
     streamQueuePromise = streamQueuePromise.then(async () => {
       try {
-        const secondaryCache = getCached(videoId);
-        if (secondaryCache) {
-          resolve(secondaryCache);
-          return;
+        if (!forceRefresh) {
+          const secondaryCache = getCached(videoId);
+          if (secondaryCache) {
+            resolve(secondaryCache);
+            return;
+          }
         }
         const streamUrl = await doResolveStreamUrl(videoId, req);
         resolve(streamUrl);
@@ -735,10 +748,12 @@ app.post("/api/warm", requireApiKey, async (req, res) => {
 
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
-    const { id, title, artist } = req.query;
+    const { id, title, artist, refresh } = req.query;
     if (!id || id === "undefined" || id === "null" || id.trim() === "") {
       return res.status(400).json({ error: "Missing or invalid 'id' parameter" });
     }
+
+    const forceRefresh = refresh === "true" || refresh === "1";
 
     const getFinalStreamUrl = (url) => {
       if (!url) return url;
@@ -774,7 +789,7 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
         try {
           const tracks = await searchLavalink("ytmsearch", query);
           if (tracks.length) {
-            const streamUrl = await resolveStreamUrl(tracks[0].uri, req);
+            const streamUrl = await resolveStreamUrl(tracks[0].uri, req, forceRefresh);
             if (streamUrl) {
               return res.json({ url: getFinalStreamUrl(streamUrl), resolvedFrom: "ytm" });
             }
@@ -786,7 +801,7 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.status(404).json({ error: "Cannot resolve Deezer/Spotify URI" });
     }
 
-    const streamUrl = await resolveStreamUrl(id, req);
+    const streamUrl = await resolveStreamUrl(id, req, forceRefresh);
     if (streamUrl) {
       return res.json({ url: getFinalStreamUrl(streamUrl) });
     }
