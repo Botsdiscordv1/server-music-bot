@@ -14,30 +14,75 @@ const deezer = require("../services/deezer");
 const axios = require("axios");
 const play = require("play-dl");
 
-let resolveWithYtDlp;
-try {
-  const ytDlp = require("@distube/yt-dlp");
-  resolveWithYtDlp = async (videoUrl) => {
-    const result = await ytDlp.raw(videoUrl, {
-      format: "bestaudio",
-      noWarnings: true,
-      getUrl: true,
+const { spawn } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+
+const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
+const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
+const CACHE_DIR = path.join(__dirname, "..", "..", ".ytdlp-cache");
+
+if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+function ytDlpGetUrl(videoUrl) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_PATH, [
+      videoUrl,
+      "-f", "bestaudio[ext=m4a]/bestaudio",
+      "-g",
+      "--no-warnings",
+      "--cache-dir", CACHE_DIR,
+    ], { timeout: 30000 });
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", d => stdout += d);
+    proc.stderr.on("data", d => stderr += d);
+    proc.on("close", code => {
+      const url = stdout.toString().trim();
+      if (code === 0 && url) resolve(url);
+      else reject(new Error(stderr || `Exit code ${code}`));
     });
-    return result.stdout.toString().trim();
-  };
-  console.log("[API/stream] yt-dlp loaded");
-} catch {
-  resolveWithYtDlp = null;
-  console.warn("[API/stream] yt-dlp not available, using play-dl only");
+    proc.on("error", reject);
+  });
 }
 
-const streamCache = new Map();
-const STREAM_CACHE_TTL = 2 * 60 * 60 * 1000; // 2 horas
-const STREAM_CACHE_MAX = 500;
-const searchCache = new Map();
-const SEARCH_CACHE_TTL = 10 * 60 * 1000; // 10 min
-const SEARCH_CACHE_MAX = 200;
+const { getCached, setCached } = (() => {
+  const DB_PATH = path.join(__dirname, "..", "..", "stream-cache.json");
 
+  function loadDisk() {
+    try { return JSON.parse(fs.readFileSync(DB_PATH, "utf8")); }
+    catch { return {}; }
+  }
+
+  function saveDisk(data) {
+    fs.writeFileSync(DB_PATH, JSON.stringify(data), "utf8");
+  }
+
+  const disk = loadDisk();
+  const mem = new Map();
+
+  // Migrate disk → mem on startup
+  for (const [k, v] of Object.entries(disk)) {
+    if (Date.now() - v.ts < 7 * 24 * 60 * 60 * 1000) mem.set(k, v);
+  }
+  if (Object.keys(disk).length !== mem.size) saveDisk(Object.fromEntries(mem));
+
+  // Flush to disk every 30s
+  setInterval(() => { saveDisk(Object.fromEntries(mem)); }, 30_000);
+
+  return {
+    getCached: (key) => {
+      const e = mem.get(key);
+      return e && Date.now() - e.ts < 7 * 24 * 60 * 60 * 1000 ? e.url : null;
+    },
+    setCached: (key, url) => {
+      mem.set(key, { url, ts: Date.now() });
+    },
+  };
+})();
+
+const searchCache = new Map();
+const SEARCH_CACHE_TTL = 10 * 60 * 1000;
+const SEARCH_CACHE_MAX = 200;
 function cleanCache(cache, ttl, max) {
   const now = Date.now();
   for (const [key, entry] of cache) {
@@ -48,7 +93,6 @@ function cleanCache(cache, ttl, max) {
     for (let i = 0; i < entries.length - max; i++) cache.delete(entries[i][0]);
   }
 }
-setInterval(() => cleanCache(streamCache, STREAM_CACHE_TTL, STREAM_CACHE_MAX), 60_000);
 setInterval(() => cleanCache(searchCache, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX), 60_000);
 
 function extractVideoId(input) {
@@ -67,21 +111,23 @@ async function resolveStreamUrl(identifier) {
   const videoId = extractVideoId(identifier);
   if (!videoId) return null;
 
-  const cached = streamCache.get(videoId);
-  if (cached && Date.now() - cached.ts < STREAM_CACHE_TTL) return cached.url;
+  const cached = getCached(videoId);
+  if (cached) return cached;
 
   const url = `https://www.youtube.com/watch?v=${videoId}`;
 
-  if (resolveWithYtDlp) {
-    try {
-      const streamUrl = await resolveWithYtDlp(url);
-      if (streamUrl) {
-        streamCache.set(videoId, { url: streamUrl, ts: Date.now() });
-        return streamUrl;
-      }
-    } catch (e) {}
+  // 1) Try yt-dlp (fast direct URL, no transcoding overhead)
+  try {
+    const streamUrl = await ytDlpGetUrl(url);
+    if (streamUrl) {
+      setCached(videoId, streamUrl);
+      return streamUrl;
+    }
+  } catch (e) {
+    console.warn(`[stream] yt-dlp failed for ${videoId}: ${e.message}`);
   }
 
+  // 2) Fallback: play-dl
   try {
     const info = await play.video_info(url).catch(async () => {
       const search = await play.search(videoId, { limit: 1 });
@@ -90,11 +136,13 @@ async function resolveStreamUrl(identifier) {
     if (info) {
       const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
       if (stream?.url) {
-        streamCache.set(videoId, { url: stream.url, ts: Date.now() });
+        setCached(videoId, stream.url);
         return stream.url;
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
+  }
 
   return null;
 }
