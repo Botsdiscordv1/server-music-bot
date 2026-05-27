@@ -21,7 +21,31 @@ const fs = require("fs");
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
 
-// ── yt-dlp extractor (sin cookies, usa emulación de cliente Android/iOS) ──
+// ── Auto-detectar navegador para cookies ──────────────────────────────
+function detectBrowser() {
+  const candidates = [
+    { name: "chrome",  paths: [process.env.LOCALAPPDATA + "\\Google\\Chrome\\User Data\\Default\\Network\\Cookies"] },
+    { name: "edge",    paths: [process.env.LOCALAPPDATA + "\\Microsoft\\Edge\\User Data\\Default\\Network\\Cookies"] },
+    { name: "brave",   paths: [process.env.LOCALAPPDATA + "\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Network\\Cookies"] },
+    { name: "firefox", paths: [process.env.APPDATA + "\\Mozilla\\Firefox\\Profiles"] },
+    { name: "opera",   paths: [process.env.APPDATA + "\\Opera Software\\Opera Stable\\Network\\Cookies"] },
+  ];
+  for (const b of candidates) {
+    if (b.name === "firefox") {
+      if (fs.existsSync(b.paths[0])) {
+        // Firefox uses profiles folder, pick the first default-release
+        const profiles = fs.readdirSync(b.paths[0]).filter(p => p.endsWith(".default-release") || p.endsWith(".default"));
+        if (profiles.length > 0) return "firefox";
+      }
+    } else if (b.paths.some(p => fs.existsSync(p))) {
+      return b.name;
+    }
+  }
+  // También probar via `where` en Linux/macOS
+  return null;
+}
+
+const detectedBrowser = detectBrowser();
 const YTDLP_BASE_ARGS = [
   "-f", "bestaudio[ext=m4a]/bestaudio",
   "-g",
@@ -30,6 +54,13 @@ const YTDLP_BASE_ARGS = [
   "--extractor-args", "youtube:include_dash_manifest=false",
   "--extractor-retries", "2",
 ];
+
+if (detectedBrowser) {
+  YTDLP_BASE_ARGS.push("--cookies-from-browser", detectedBrowser);
+  console.log(`[yt-dlp] usando cookies de ${detectedBrowser}`);
+} else {
+  console.log("[yt-dlp] sin cookies — puede haber bloqueos");
+}
 
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
