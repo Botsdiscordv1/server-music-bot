@@ -122,8 +122,25 @@ function extractVideoId(input) {
   return null;
 }
 
+async function extractVideoIdFromLavalink(input) {
+  try {
+    // lavasrc format: <base64>||<plugin_data>
+    const track = input.includes("||") ? input.split("||")[0] : input;
+    if (!/^[A-Za-z0-9+/=]+$/.test(track)) return null;
+    const res = await axios.get(`${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/decodetrack`, {
+      params: { encodedTrack: track },
+      headers: { Authorization: LAVALINK_AUTH },
+      timeout: 5000,
+    });
+    return res.data?.info?.identifier || null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveStreamUrl(identifier) {
-  const videoId = extractVideoId(identifier);
+  let videoId = extractVideoId(identifier);
+  if (!videoId) videoId = extractVideoIdFromLavalink(identifier);
   if (!videoId) return null;
 
   const cached = getCached(videoId);
