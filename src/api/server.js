@@ -328,25 +328,9 @@ app.get("/api/spotify/search", requireApiKey, async (req, res) => {
     const q = req.query.q;
     const limit = Math.min(parseInt(req.query.limit) || 5, 20);
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
-    try {
-      let tracks = await spotify.searchTracks(q, limit);
-      const artistIds = [...new Set(tracks.map(t => t.artistId).filter(Boolean))];
-      if (artistIds.length) {
-        const artists = await spotify.getArtists(artistIds);
-        const genreMap = {};
-        for (const a of artists) {
-          if (a?.id) genreMap[a.id] = a.genres || [];
-        }
-        tracks = tracks.map(t => ({ ...t, genres: genreMap[t.artistId] || [] }));
-      }
-      return res.json({ query: q, tracks, source: "spotify" });
-    } catch (spotifyErr) {
-      console.warn("Spotify Search failed, falling back to YouTube Music:", spotifyErr.message);
-      const tracks = await searchLavalink("ytmsearch", q);
-      res.json({ query: q, tracks, source: "youtube" });
-    }
+    const tracks = await spotify.searchTracks(q, limit);
+    res.json({ query: q, tracks, source: "spotify" });
   } catch (err) {
-    console.error("All Search Sources Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -356,30 +340,9 @@ app.get("/api/spotify/search/albums", requireApiKey, async (req, res) => {
     const q = req.query.q;
     const limit = Math.min(parseInt(req.query.limit) || 5, 20);
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
-    try {
-      const albums = await spotify.searchAlbums(q, limit);
-      return res.json({ query: q, albums, source: "spotify" });
-    } catch (spotifyErr) {
-      console.warn("Spotify Album Search failed, falling back to YouTube Music:", spotifyErr.message);
-      const tracks = await searchLavalink("ytmsearch", q);
-      const albumMap = {};
-      for (const t of tracks) {
-        const key = t.album || "Unknown";
-        if (!albumMap[key] && Object.keys(albumMap).length < limit) {
-          albumMap[key] = {
-            id: t.id,
-            name: t.album || "Unknown",
-            artists: t.artist || "Unknown",
-            image: t.artworkUrl || null,
-            totalTracks: 0,
-            uri: t.uri || t.encoded,
-          };
-        }
-      }
-      res.json({ query: q, albums: Object.values(albumMap), source: "youtube" });
-    }
+    const albums = await spotify.searchAlbums(q, limit);
+    res.json({ query: q, albums, source: "spotify" });
   } catch (err) {
-    console.error("All Album Search Sources Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
