@@ -267,6 +267,14 @@ app.get("/api/search", requireApiKey, async (req, res) => {
           try { await resolveStreamUrl(track.uri, req); } catch (e) {}
         }
       }
+      // Enriquecer portadas con Deezer en background
+      try {
+        const enriched = await enrichArtworkWithDeezer(tracks);
+        if (enriched.length) {
+          result.tracks = enriched;
+          searchCache.set(cacheKey, { data: result, ts: Date.now() });
+        }
+      } catch (e) {}
     });
   } catch (err) {
     console.error("Search Error:", err.message);
@@ -295,6 +303,20 @@ async function searchLavalink(source, query) {
     isrc: t.info?.isrc || t.pluginInfo?.isrc || null,
     explicit: t.info?.explicit === true,
   }));
+}
+
+async function enrichArtworkWithDeezer(tracks) {
+  const enriched = [...tracks];
+  for (const track of enriched) {
+    if (track.artworkUrl?.startsWith("http") && !track.artworkUrl?.includes("ytimg")) continue;
+    try {
+      const q = encodeURIComponent(`${track.artist} ${track.title}`);
+      const res = await axios.get(`https://api.deezer.com/search/track?q=${q}&limit=1`, { timeout: 5000 });
+      const data = res.data?.data?.[0];
+      if (data?.album?.cover_medium) track.artworkUrl = data.album.cover_medium;
+    } catch (e) {}
+  }
+  return enriched;
 }
 
 app.get("/api/spotify/search", requireApiKey, async (req, res) => {
