@@ -16,8 +16,48 @@ async function searchLavalink(source, query, limit = 5) {
 }
 
 function isExplicit(title, author) {
-  const text = `${title} ${author}`.toLowerCase();
+  const text = `${title || ""} ${author || ""}`.toLowerCase();
   return /\bexplicit\b/.test(text) && !/\bclean\b/.test(text);
+}
+
+function formatLavalinkTrack(t) {
+  const title = t.info?.title || "";
+  const author = t.info?.author || "";
+  return {
+    id: t.info?.identifier,
+    title,
+    artist: author,
+    album: t.info?.albumName || t.pluginInfo?.albumName || null,
+    thumbnail: t.info?.artworkUrl,
+    duration: t.info?.duration,
+    uri: t.info?.uri,
+    isrc: t.info?.isrc || null,
+    explicit: isExplicit(title, author),
+    genres: [],
+  };
+}
+
+async function searchLavalink(source, query, limit = 5) {
+  const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(source + ":" + query)}`;
+  const response = await axios.get(url, {
+    headers: { Authorization: LAVALINK_AUTH },
+    timeout: 15000,
+  });
+  const tracks = (response.data?.data || []).slice(0, limit).map(formatLavalinkTrack);
+  await enrichExplicitWithDeezerISRC(tracks);
+  return tracks;
+}
+
+async function enrichExplicitWithDeezerISRC(tracks) {
+  const lookups = tracks
+    .filter(t => t.isrc)
+    .map(async (track) => {
+      try {
+        const res = await axios.get(`https://api.deezer.com/track/isrc:${track.isrc}`, { timeout: 3000 });
+        if (res.data?.explicit_lyrics !== undefined) track.explicit = res.data.explicit_lyrics;
+      } catch (e) {}
+    });
+  await Promise.allSettled(lookups);
 }
 
 function formatLavalinkTrack(t) {
