@@ -139,8 +139,19 @@ async function extractVideoIdFromLavalink(input) {
 }
 
 async function resolveStreamUrl(identifier) {
+  if (!identifier || typeof identifier !== "string") return null;
+
+  // Si ya es URL de audio directa (Deezer, etc.), cachear y devolver
+  if (/^https?:\/\/.+\.(mp3|m4a|ogg|wav|flac|opus)(\?|$)/i.test(identifier)) {
+    const hash = identifier.slice(0, 40);
+    const cached = getCached(hash);
+    if (cached) return cached;
+    setCached(hash, identifier);
+    return identifier;
+  }
+
   let videoId = extractVideoId(identifier);
-  if (!videoId) videoId = extractVideoIdFromLavalink(identifier);
+  if (!videoId) videoId = await extractVideoIdFromLavalink(identifier);
   if (!videoId) return null;
 
   const cached = getCached(videoId);
