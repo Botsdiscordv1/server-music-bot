@@ -314,14 +314,18 @@ async function searchLavalink(source, query) {
 async function enrichArtworkWithDeezer(tracks) {
   const enriched = [...tracks];
   for (const track of enriched) {
-    if (track.artworkUrl?.startsWith("http") && !track.artworkUrl?.includes("ytimg")) continue;
+    const needsArtwork = !track.artworkUrl?.startsWith("http") || track.artworkUrl?.includes("ytimg");
+    if (!needsArtwork && track.explicit !== undefined) continue;
     try {
       const q = encodeURIComponent(`${track.artist} ${track.title}`);
       const res = await axios.get(`https://api.deezer.com/search/track?q=${q}&limit=1`, { timeout: 5000 });
       const data = res.data?.data?.[0];
-      if (data?.album?.cover_medium) {
-        track.artworkUrl = data.album.cover_medium;
-        track.thumbnail = data.album.cover_medium;
+      if (data) {
+        if (data.album?.cover_medium) {
+          track.artworkUrl = data.album.cover_medium;
+          track.thumbnail = data.album.cover_medium;
+        }
+        if (data.explicit_lyrics !== undefined) track.explicit = data.explicit_lyrics;
       }
     } catch (e) {}
   }
