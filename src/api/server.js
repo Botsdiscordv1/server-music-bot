@@ -20,90 +20,20 @@ const fs = require("fs");
 
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
-const COOKIES_PATH = path.join(__dirname, "..", "..", "cookies.txt");
 
-// ── Cookies ──────────────────────────────────────────────────────────
-let cookiesActive = false;
-const cookieHealth = { ok: false, lastError: null, lastErrorAt: null, errorCount: 0 };
-
-const COOKIE_EXPIRY_PATTERNS = [
-  /sign in to confirm/i,
-  /sign in required/i,
-  /HTTP Error 429/i,
-  /HTTP Error 403/i,
-  /cookie.*expir/i,
-  /please sign in/i,
-  /bot.*(?:block|detect)/i,
+// ── yt-dlp extractor (sin cookies, usa emulación de cliente Android/iOS) ──
+const YTDLP_BASE_ARGS = [
+  "-f", "bestaudio[ext=m4a]/bestaudio",
+  "-g",
+  "--no-warnings",
+  "--extractor-args", "youtube:player_client=android,web",
+  "--extractor-args", "youtube:include_dash_manifest=false",
+  "--extractor-retries", "2",
 ];
 
-function isCookieError(text) {
-  return COOKIE_EXPIRY_PATTERNS.some(p => p.test(text));
-}
-
-function markCookieError(errMsg) {
-  cookieHealth.lastError = errMsg;
-  cookieHealth.lastErrorAt = new Date().toISOString();
-  cookieHealth.errorCount++;
-  // Mark as expired after 3+ consecutive errors
-  if (cookieHealth.errorCount >= 3) {
-    cookieHealth.ok = false;
-    console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-    console.error("[cookies] LAS COOKIES DE YOUTUBE EXPIRARON");
-    console.error("[cookies] Reexporta cookies.txt desde tu navegador");
-    console.error("[cookies] o actualiza la variable YT_COOKIES en Render");
-    console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-  }
-}
-
-function markCookieOk() {
-  cookieHealth.ok = true;
-  cookieHealth.errorCount = 0;
-}
-
-function loadCookies() {
-  // 1) Escribir cookies desde variable de entorno (para Render)
-  if (process.env.YT_COOKIES && !fs.existsSync(COOKIES_PATH)) {
-    try {
-      const decoded = Buffer.from(process.env.YT_COOKIES, "base64").toString("utf8");
-      fs.writeFileSync(COOKIES_PATH, decoded, "utf8");
-      console.log("[cookies] escritas desde YT_COOKIES env var");
-    } catch (e) {
-      console.warn("[cookies] error al decodificar YT_COOKIES:", e.message);
-    }
-  }
-
-  // 2) Cargar cookies desde archivo
-  if (!fs.existsSync(COOKIES_PATH)) {
-    console.log("[cookies] no cookies.txt found — extractor sin autenticar");
-    return;
-  }
-  try {
-    const raw = fs.readFileSync(COOKIES_PATH, "utf8");
-
-    play.setToken({
-      youtube: { cookie: raw },
-    });
-
-    cookiesActive = true;
-    markCookieOk();
-    console.log("[cookies] cookies.txt cargadas — extractor autenticado");
-  } catch (e) {
-    console.warn("[cookies] error al cargar cookies.txt:", e.message);
-  }
-}
-loadCookies();
-
-// ── yt-dlp extractor ─────────────────────────────────────────────────
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
-    const args = [
-      videoUrl,
-      "-f", "bestaudio[ext=m4a]/bestaudio",
-      "-g",
-      "--no-warnings",
-    ];
-    if (cookiesActive) args.push("--cookies", COOKIES_PATH);
-    const proc = spawn(YTDLP_PATH, args, { timeout: 30000 });
+    const proc = spawn(YTDLP_PATH, [videoUrl, ...YTDLP_BASE_ARGS], { timeout: 30000 });
     let stdout = "", stderr = "";
     proc.stdout.on("data", d => stdout += d);
     proc.stderr.on("data", d => stderr += d);
@@ -185,18 +115,15 @@ async function resolveStreamUrl(identifier) {
   const cached = getCached(videoId);
   if (cached) return cached;
 
-  // 1) yt-dlp (child process, ~5-15s en frío pero confiable)
+  // 1) yt-dlp (emulación Android, sin cookies)
   try {
     const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`);
     if (streamUrl) {
       setCached(videoId, streamUrl);
-      if (cookiesActive) markCookieOk();
       return streamUrl;
     }
   } catch (e) {
-    const msg = e.message;
-    if (isCookieError(msg)) markCookieError(msg);
-    console.warn(`[stream] yt-dlp failed for ${videoId}: ${msg}`);
+    console.warn(`[stream] yt-dlp failed for ${videoId}: ${e.message}`);
   }
 
   // 2) Fallback: play-dl
@@ -209,14 +136,11 @@ async function resolveStreamUrl(identifier) {
       const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
       if (stream?.url) {
         setCached(videoId, stream.url);
-        if (cookiesActive) markCookieOk();
         return stream.url;
       }
     }
   } catch (e) {
-    const msg = e.message;
-    if (isCookieError(msg)) markCookieError(msg);
-    console.warn(`[stream] play-dl failed for ${videoId}: ${msg}`);
+    console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
   }
 
   return null;
@@ -245,16 +169,7 @@ app.get("/", (req, res) => {
 
 // API Health Check (Para el App Android)
 app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "music-api",
-    cookies: cookiesActive ? {
-      ok: cookieHealth.ok,
-      errorCount: cookieHealth.errorCount,
-      lastError: cookieHealth.lastError,
-      lastErrorAt: cookieHealth.lastErrorAt,
-    } : { ok: null, errorCount: 0, lastError: "no cookies configured" },
-  });
+  res.json({ status: "ok", service: "music-api", extractor: "yt-dlp (android client)" });
 });
 
 app.get("/api/search", requireApiKey, async (req, res) => {
