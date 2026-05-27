@@ -650,6 +650,47 @@ async function removeDislikedSongById(userId, id, source = "android") {
   return target;
 }
 
+// ── Migration helpers ──────────────────────────────────────────────────
+const BAD_URI_REGEX = /^(https?:\/\/(www\.)?(deezer\.com|open\.spotify\.com)|spotify:(track|album|playlist):)/i;
+
+async function findLikedSongByUrl(url, source = "android") {
+  const { LikedSong } = getModels(source);
+  await whenReady(() => {});
+  const doc = await LikedSong.findOne({ trackUrl: url }).lean();
+  if (!doc) return null;
+  return {
+    _id: doc._id.toString(),
+    userId: doc.userId,
+    track_title: doc.trackTitle,
+    track_author: doc.trackAuthor,
+    track_url: doc.trackUrl,
+    isrc: doc.isrc,
+  };
+}
+
+async function updateLikedSongUrl(docId, newUrl, source = "android") {
+  const { LikedSong } = getModels(source);
+  await whenReady(() => {});
+  const result = await LikedSong.updateOne({ _id: docId }, { $set: { trackUrl: newUrl } });
+  return result.modifiedCount > 0;
+}
+
+async function getAllLikedSongsWithBadUrls(source = "android") {
+  const { LikedSong } = getModels(source);
+  await whenReady(() => {});
+  const docs = await LikedSong.find({}).lean();
+  return docs
+    .filter(doc => doc.trackUrl && BAD_URI_REGEX.test(doc.trackUrl))
+    .map(doc => ({
+      _id: doc._id.toString(),
+      userId: doc.userId,
+      track_title: doc.trackTitle,
+      track_author: doc.trackAuthor,
+      track_url: doc.trackUrl,
+      isrc: doc.isrc,
+    }));
+}
+
 module.exports = {
   initDB,
   updateUserStats,
@@ -686,5 +727,9 @@ module.exports = {
   getDislikedSongs,
   removeDislikedSong,
   removeDislikedSongById,
+  findLikedSongByUrl,
+  updateLikedSongUrl,
+  getAllLikedSongsWithBadUrls,
+  BAD_URI_REGEX,
   DiscordUser,
 };

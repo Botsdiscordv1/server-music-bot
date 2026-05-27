@@ -8,6 +8,12 @@ const User = require("../models/User");
 const { requireApiKey, requireAuth } = require("./middleware/auth");
 const db = require("../database");
 const { DiscordUser } = db;
+const {
+  findLikedSongByUrl,
+  updateLikedSongUrl,
+  getAllLikedSongsWithBadUrls,
+  BAD_URI_REGEX,
+} = db;
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
 
@@ -22,40 +28,32 @@ const fs = require("fs");
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
 
-const YT_CLIENTS = ["android", "ios"];
-
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
-    const tryClient = (idx) => {
-      const client = YT_CLIENTS[idx];
-      const args = [
-        videoUrl,
-        "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-        "-g",
-        "--no-warnings",
-        "--extractor-args", `youtube:player_client=${client};skip=webpage;include_dash_manifest=false;player_skip=webpage,configs`,
-        "--extractor-retries", "2",
-        "--sleep-requests", "0.5",
-        "--sleep-interval", "1",
-        "--max-sleep", "3",
-      ];
-      const proc = spawn(YTDLP_PATH, args, { timeout: 45000 });
-      let stdout = "", stderr = "";
-      proc.stdout.on("data", d => stdout += d);
-      proc.stderr.on("data", d => stderr += d);
-      proc.on("close", code => {
-        const url = stdout.toString().trim();
-        if (code === 0 && url) { resolve(url); return; }
-        if (idx + 1 < YT_CLIENTS.length) {
-          console.warn(`[yt-dlp] cliente ${YT_CLIENTS[idx]} falló, probando ${YT_CLIENTS[idx + 1]}...`);
-          tryClient(idx + 1);
-        } else {
-          reject(new Error(stderr || `Exit code ${code}`));
-        }
-      });
-      proc.on("error", reject);
-    };
-    tryClient(0);
+    const args = [
+      videoUrl,
+      "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+      "-g",
+      "--no-warnings",
+      "--js-runtimes", "node",
+      "--extractor-retries", "2",
+      "--sleep-requests", "0.5",
+      "--sleep-interval", "1",
+      "--max-sleep", "3",
+    ];
+    const proc = spawn(YTDLP_PATH, args, { timeout: 45000 });
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", d => stdout += d);
+    proc.stderr.on("data", d => stderr += d);
+    proc.on("close", code => {
+      const url = stdout.toString().trim();
+      if (code === 0 && url) {
+        resolve(url);
+      } else {
+        reject(new Error(stderr || `Exit code ${code}`));
+      }
+    });
+    proc.on("error", reject);
   });
 }
 
@@ -86,7 +84,32 @@ const { getCached, setCached } = (() => {
   return {
     getCached: (key) => {
       const e = mem.get(key);
-      return e && Date.now() - e.ts < 7 * 24 * 60 * 60 * 1000 ? e.url : null;
+      if (!e) return null;
+
+      // Si la URL contiene un parámetro de expiración (como las de YouTube)
+      if (e.url && e.url.includes("expire=")) {
+        try {
+          const urlObj = new URL(e.url);
+          const expireSec = parseInt(urlObj.searchParams.get("expire"));
+          if (expireSec) {
+            const nowSec = Math.floor(Date.now() / 1000);
+            // Si ya expiró o está a menos de 10 minutos de expirar, la descartamos
+            if (nowSec >= expireSec - 600) {
+              mem.delete(key);
+              return null;
+            }
+            return e.url;
+          }
+        } catch (err) {}
+      }
+
+      // Tiempo de vida por defecto para otros tipos de URL (7 días)
+      const isValid = Date.now() - e.ts < 7 * 24 * 60 * 60 * 1000;
+      if (!isValid) {
+        mem.delete(key);
+        return null;
+      }
+      return e.url;
     },
     setCached: (key, url) => {
       mem.set(key, { url, ts: Date.now() });
@@ -230,22 +253,38 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", service: "music-api", extractor: "yt-dlp (android client)" });
 });
 
-// Proxy de audio (Deezer, etc.) — añade headers que el reproductor nativo no manda
+// Proxy de audio (Deezer, Spotify, YouTube, etc.) — soporta Range/Partial Content
 app.get("/api/proxy/audio", async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).json({ error: "Missing url" });
+
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  };
+  if (targetUrl.includes("deezer.com")) {
+    headers["Referer"] = "https://deezer.com/";
+  }
+  if (req.headers.range) {
+    headers["Range"] = req.headers.range;
+  }
+
   try {
     const response = await axios.get(targetUrl, {
       responseType: "stream",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Referer": "https://deezer.com/",
-      },
+      headers: headers,
       timeout: 15000,
+      validateStatus: (status) => (status >= 200 && status < 300) || status === 206,
     });
-    res.set("Content-Type", response.headers["content-type"] || "audio/mpeg");
+
+    res.status(response.status);
+    if (response.headers["content-type"]) res.set("Content-Type", response.headers["content-type"]);
+    if (response.headers["content-length"]) res.set("Content-Length", response.headers["content-length"]);
+    if (response.headers["content-range"]) res.set("Content-Range", response.headers["content-range"]);
+    if (response.headers["accept-ranges"]) res.set("Accept-Ranges", response.headers["accept-ranges"]);
+
     response.data.pipe(res);
   } catch (e) {
+    console.error("Proxy error:", e.message);
     res.status(502).json({ error: "Proxy fetch failed: " + (e.message || e) });
   }
 });
@@ -414,19 +453,101 @@ app.post("/api/warm", requireApiKey, async (req, res) => {
 
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
-    const { id } = req.query;
+    const { id, title, artist } = req.query;
     if (!id || id === "undefined" || id === "null" || id.trim() === "") {
       return res.status(400).json({ error: "Missing or invalid 'id' parameter" });
     }
 
+    const getFinalStreamUrl = (url) => {
+      if (url && (url.includes("googlevideo.com") || url.includes("youtube.com") || url.includes("youtu.be")) && req) {
+        return `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(url)}`;
+      }
+      return url;
+    };
+
+    // (D) Fallback: URI de Deezer/Spotify → buscar en YTM por título+autor
+    if (BAD_URI_REGEX.test(id)) {
+      let query = null;
+      if (title && artist) {
+        query = `${artist} - ${title}`.trim();
+      } else {
+        // Buscar en DB por URL
+        const found = await findLikedSongByUrl(id, "android") ||
+                      await findLikedSongByUrl(id, "discord");
+        if (found && found.track_title) {
+          query = `${found.track_author || ""} - ${found.track_title}`.trim();
+        }
+      }
+      if (query && query !== "-") {
+        try {
+          const tracks = await searchLavalink("ytmsearch", query);
+          if (tracks.length) {
+            const streamUrl = await resolveStreamUrl(tracks[0].uri, req);
+            if (streamUrl) {
+              return res.json({ url: getFinalStreamUrl(streamUrl), resolvedFrom: "ytm" });
+            }
+          }
+        } catch (e) {
+          console.warn("[stream] YTM fallback failed:", e.message);
+        }
+      }
+      return res.status(404).json({ error: "Cannot resolve Deezer/Spotify URI" });
+    }
+
     const streamUrl = await resolveStreamUrl(id, req);
-    if (streamUrl) return res.json({ url: streamUrl });
+    if (streamUrl) {
+      return res.json({ url: getFinalStreamUrl(streamUrl) });
+    }
 
     res.status(404).json({ error: "No stream found after fallback" });
   } catch (err) {
     console.error("Critical Stream Error:", err.stack);
     res.status(500).json({ error: "Server Internal Error" });
   }
+});
+
+// (C) Endpoint de migración: reemplaza URLs de Deezer/Spotify por YTM en MongoDB
+app.post("/api/admin/migrate-liked-urls", requireApiKey, async (req, res) => {
+  const sources = ["android", "discord"];
+  const results = {};
+  let totalGlobal = 0, updatedGlobal = 0, failedGlobal = 0;
+
+  for (const source of sources) {
+    let updated = 0, failed = 0;
+    try {
+      const badSongs = await getAllLikedSongsWithBadUrls(source);
+      results[source] = { total: badSongs.length, updated: 0, failed: 0 };
+      totalGlobal += badSongs.length;
+
+      for (const song of badSongs) {
+        const query = [
+          song.track_author && song.track_title ? `${song.track_author} - ${song.track_title}` : null,
+          song.track_title,
+        ].filter(Boolean);
+
+        let resolved = false;
+        for (const q of query) {
+          try {
+            const tracks = await searchLavalink("ytmsearch", q);
+            if (tracks.length && tracks[0].uri) {
+              const ok = await updateLikedSongUrl(song._id, tracks[0].uri, source);
+              if (ok) { updated++; resolved = true; break; }
+            }
+          } catch {}
+        }
+        if (!resolved) failed++;
+      }
+    } catch (e) {
+      console.error(`[migrate] Error source=${source}:`, e.message);
+      results[source] = results[source] || { total: 0, updated: 0, failed: 0 };
+    }
+    results[source].updated = updated;
+    results[source].failed = failed;
+    updatedGlobal += updated;
+    failedGlobal += failed;
+  }
+
+  res.json({ total: totalGlobal, updated: updatedGlobal, failed: failedGlobal, bySource: results });
 });
 
 app.get("/api/lyrics", requireApiKey, async (req, res) => {
