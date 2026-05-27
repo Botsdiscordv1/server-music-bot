@@ -18,89 +18,45 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
+
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
 
-// ── Navegadores (Chromium vs Firefox) ─────────────────────────────────
-function getBrowsers() {
-  const chromium = [];
-  const ffPath = process.env.APPDATA + "\\Mozilla\\Firefox\\Profiles";
-  let hasFirefox = false;
-  try {
-    if (fs.existsSync(ffPath)) {
-      hasFirefox = fs.readdirSync(ffPath).some(p => p.endsWith(".default-release") || p.endsWith(".default"));
-    }
-  } catch {}
-  const checks = [
-    { name: "chrome", path: process.env.LOCALAPPDATA + "\\Google\\Chrome\\User Data\\Default\\Network\\Cookies" },
-    { name: "edge",   path: process.env.LOCALAPPDATA + "\\Microsoft\\Edge\\User Data\\Default\\Network\\Cookies" },
-    { name: "brave",  path: process.env.LOCALAPPDATA + "\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Network\\Cookies" },
-    { name: "opera",  path: process.env.APPDATA + "\\Opera Software\\Opera Stable\\Network\\Cookies" },
-  ];
-  for (const c of checks) {
-    try { if (fs.existsSync(c.path)) chromium.push(c.name); } catch {}
-  }
-  return { chromium, hasFirefox };
-}
-
-const { chromium: chromiumBrowsers, hasFirefox } = getBrowsers();
-
-const YTDLP_BASE_ARGS = [
-  "-f", "bestaudio[ext=m4a]/bestaudio",
-  "-g",
-  "--no-warnings",
-  "--extractor-args", "youtube:player_client=android,web",
-  "--extractor-args", "youtube:include_dash_manifest=false",
-  "--extractor-retries", "2",
-];
-
-if (chromiumBrowsers.length > 0 || hasFirefox) {
-  const list = [...chromiumBrowsers];
-  if (hasFirefox) list.push("firefox");
-  console.log(`[yt-dlp] navegadores detectados: ${list.join(", ")}`);
-} else {
-  console.log("[yt-dlp] sin navegador detectado — puede haber bloqueos");
-}
+const YT_CLIENTS = ["ios", "android", "web"];
 
 function ytDlpGetUrl(videoUrl) {
   return new Promise((resolve, reject) => {
-    const tryBrowser = (remaining) => {
-      const args = [...YTDLP_BASE_ARGS];
-      if (remaining.length > 0) {
-        args.push("--cookies-from-browser", remaining[0]);
-      } else {
-        // Sin cookies: añadir protección rate-limit
-        args.push("--sleep-requests", "1", "--sleep-interval", "1");
-      }
-      const proc = spawn(YTDLP_PATH, [videoUrl, ...args], { timeout: 30000 });
+    const tryClient = (idx) => {
+      const args = [
+        videoUrl,
+        "-f", "bestaudio[ext=m4a]/bestaudio",
+        "-g",
+        "--no-warnings",
+        "--extractor-args", `youtube:player_client=${YT_CLIENTS[idx]}`,
+        "--extractor-args", "youtube:skip=webpage",
+        "--extractor-args", "youtube:include_dash_manifest=false",
+        "--extractor-retries", "2",
+        "--sleep-requests", "0.5",
+        "--sleep-interval", "1",
+        "--max-sleep", "3",
+      ];
+      const proc = spawn(YTDLP_PATH, args, { timeout: 45000 });
       let stdout = "", stderr = "";
       proc.stdout.on("data", d => stdout += d);
       proc.stderr.on("data", d => stderr += d);
       proc.on("close", code => {
         const url = stdout.toString().trim();
         if (code === 0 && url) { resolve(url); return; }
-        const err = stderr || `Exit code ${code}`;
-        // Chromium bloqueado (DPAPI / locked) → saltar todos los Chromium
-        const isChromiumLocked = err.includes("DPAPI") || err.includes("Could not copy Chrome");
-        if (isChromiumLocked && remaining.length > 0) {
-          const current = remaining[0];
-          const next = remaining.slice(1);
-          // Si el actual es Chromium, saltar el resto de Chromium también
-          if (chromiumBrowsers.includes(current)) {
-            const remainingCount = next.filter(b => !chromiumBrowsers.includes(b)).length;
-            console.warn(`[yt-dlp] ${current} bloqueado (navegador abierto), saltando Chromium...`);
-            tryBrowser(next.filter(b => !chromiumBrowsers.includes(b)));
-          } else {
-            console.warn(`[yt-dlp] ${current} falló, probando siguiente...`);
-            tryBrowser(next);
-          }
+        if (idx + 1 < YT_CLIENTS.length) {
+          console.warn(`[yt-dlp] cliente ${YT_CLIENTS[idx]} falló, probando ${YT_CLIENTS[idx + 1]}...`);
+          tryClient(idx + 1);
         } else {
-          reject(new Error(err));
+          reject(new Error(stderr || `Exit code ${code}`));
         }
       });
       proc.on("error", reject);
     };
-    tryBrowser([...chromiumBrowsers, ...(hasFirefox ? ["firefox"] : [])]);
+    tryClient(0);
   });
 }
 
