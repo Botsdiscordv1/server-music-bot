@@ -51,6 +51,54 @@ function cleanCache(cache, ttl, max) {
 setInterval(() => cleanCache(streamCache, STREAM_CACHE_TTL, STREAM_CACHE_MAX), 60_000);
 setInterval(() => cleanCache(searchCache, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX), 60_000);
 
+function extractVideoId(input) {
+  if (!input) return null;
+  const s = input.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
+  try {
+    const url = new URL(s);
+    if (url.hostname.includes("youtube")) return url.searchParams.get("v");
+    if (url.hostname === "youtu.be") return url.pathname.slice(1).split("?")[0] || null;
+  } catch {}
+  return null;
+}
+
+async function resolveStreamUrl(identifier) {
+  const videoId = extractVideoId(identifier);
+  if (!videoId) return null;
+
+  const cached = streamCache.get(videoId);
+  if (cached && Date.now() - cached.ts < STREAM_CACHE_TTL) return cached.url;
+
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+  if (resolveWithYtDlp) {
+    try {
+      const streamUrl = await resolveWithYtDlp(url);
+      if (streamUrl) {
+        streamCache.set(videoId, { url: streamUrl, ts: Date.now() });
+        return streamUrl;
+      }
+    } catch (e) {}
+  }
+
+  try {
+    const info = await play.video_info(url).catch(async () => {
+      const search = await play.search(videoId, { limit: 1 });
+      return search[0] ? await play.video_info(search[0].url) : null;
+    });
+    if (info) {
+      const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
+      if (stream?.url) {
+        streamCache.set(videoId, { url: stream.url, ts: Date.now() });
+        return stream.url;
+      }
+    }
+  } catch (e) {}
+
+  return null;
+}
+
 const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
 const LAVALINK_PORT = Number(process.env.LAVALINK_PORT) || 2333;
 const LAVALINK_SECURE = process.env.LAVALINK_SECURE === "true";
@@ -110,6 +158,17 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     const result = { query: q, source, tracks };
     searchCache.set(cacheKey, { data: result, ts: Date.now() });
     res.json(result);
+
+    // Pre-resolver streams en background
+    if (tracks.length > 0) {
+      setImmediate(async () => {
+        for (const track of tracks.slice(0, 3)) {
+          if (track.uri) {
+            try { await resolveStreamUrl(track.uri); } catch (e) {}
+          }
+        }
+      });
+    }
   } catch (err) {
     console.error("Search Error:", err.message);
     res.status(500).json({ error: err.message });
@@ -170,52 +229,8 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid 'id' parameter" });
     }
 
-    const cacheKey = id.trim();
-    const cached = streamCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < STREAM_CACHE_TTL) {
-      return res.json({ url: cached.url });
-    }
-
-    // Convertir ID a URL de YouTube
-    let url = id;
-    if (!id.startsWith("http")) {
-      url = `https://www.youtube.com/watch?v=${id}`;
-    }
-
-    // Intentar yt-dlp si está disponible (fue removido pero lo dejamos por si se reinstala)
-    if (resolveWithYtDlp) {
-      try {
-        const streamUrl = await resolveWithYtDlp(url);
-        if (streamUrl) {
-          streamCache.set(cacheKey, { url: streamUrl, ts: Date.now() });
-          return res.json({ url: streamUrl });
-        }
-      } catch (e) {}
-    }
-
-    // Fallback a play-dl (Principal)
-    try {
-      // Optimización: Si es un ID de 11 chars, forzar búsqueda o info directa
-      const info = await play.video_info(url).catch(async () => {
-         // Si video_info falla (ej: video privado/borrado), intentamos buscarlo por título si el App enviara más info,
-         // pero aquí solo tenemos el ID. Intentamos una vez más con play.search
-         const search = await play.search(id, { limit: 1 });
-         return search[0] ? await play.video_info(search[0].url) : null;
-      });
-
-      if (info) {
-        const stream = await play.stream_from_info(info, {
-          quality: 2,
-          discordPlayerCompatibility: true
-        });
-        if (stream?.url) {
-          streamCache.set(cacheKey, { url: stream.url, ts: Date.now() });
-          return res.json({ url: stream.url });
-        }
-      }
-    } catch (pdErr) {
-      console.error(`[play-dl] Error for ${id}:`, pdErr.message);
-    }
+    const streamUrl = await resolveStreamUrl(id);
+    if (streamUrl) return res.json({ url: streamUrl });
 
     res.status(404).json({ error: "No stream found after fallback" });
   } catch (err) {
