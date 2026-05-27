@@ -139,7 +139,8 @@ function ytDlpGetUrl(videoUrl) {
     if (fs.existsSync(COOKIES_PATH)) {
       args.push("--cookies", COOKIES_PATH);
     }
-    const proc = spawn(YTDLP_PATH, args, { timeout: 45000 });
+    const executionTimeout = IS_RENDER ? 12000 : 45000;
+    const proc = spawn(YTDLP_PATH, args, { timeout: executionTimeout });
     let stdout = "", stderr = "";
     proc.stdout.on("data", d => stdout += d);
     proc.stderr.on("data", d => stderr += d);
@@ -331,6 +332,41 @@ async function resolveStreamUrl(identifier, req = null) {
   });
 }
 
+async function resolveViaCobalt(videoId) {
+  const instances = [
+    "https://apicobalt.mgytr.top",
+    "https://cobalt.alpha.wolfy.love",
+    "https://lime.clxxped.lol",
+    "https://api.qwkuns.me"
+  ];
+  
+  for (const instance of instances) {
+    try {
+      console.log(`[stream] Trying Cobalt instance: ${instance} for video ${videoId}`);
+      const res = await axios.post(instance, {
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        audioFormat: "best",
+        downloadMode: "audio"
+      }, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        },
+        timeout: 8000
+      });
+      
+      if (res.status === 200 && res.data && res.data.url) {
+        console.log(`[stream] Success resolving ${videoId} via Cobalt (${instance})`);
+        return res.data.url;
+      }
+    } catch (err) {
+      console.warn(`[stream] Cobalt instance ${instance} failed: ${err.message}`);
+    }
+  }
+  return null;
+}
+
 async function resolveViaInvidious(videoId) {
   const instances = [
     "https://yewtu.be",
@@ -366,7 +402,39 @@ async function resolveViaInvidious(videoId) {
 }
 
 async function doResolveStreamUrl(videoId, req = null) {
-  // 1) yt-dlp (emulación Android, sin cookies)
+  const hasCookies = fs.existsSync(COOKIES_PATH);
+
+  // 1) En Render, si no hay cookies, saltamos directo a Cobalt para máxima velocidad y evitar bloqueos
+  if (IS_RENDER && !hasCookies) {
+    console.log(`[stream] Running on Render without cookies. Prioritizing Cobalt for ${videoId}`);
+    try {
+      const streamUrl = await resolveViaCobalt(videoId);
+      if (streamUrl) {
+        setCached(videoId, streamUrl);
+        return streamUrl;
+      }
+    } catch (e) {
+      console.warn(`[stream] Cobalt failed on Render: ${e.message}`);
+    }
+    
+    // Fallback: Invidious
+    try {
+      const streamUrl = await resolveViaInvidious(videoId);
+      if (streamUrl) {
+        setCached(videoId, streamUrl);
+        return streamUrl;
+      }
+    } catch (e) {
+      console.warn(`[stream] Invidious fallback failed on Render: ${e.message}`);
+    }
+    
+    failedVideoIds.set(videoId, Date.now());
+    return null;
+  }
+
+  // 2) Caso estándar (Local o Render con cookies): intentamos la jerarquía normal
+  
+  // A. yt-dlp
   try {
     const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`);
     if (streamUrl) {
@@ -377,24 +445,37 @@ async function doResolveStreamUrl(videoId, req = null) {
     console.warn(`[stream] yt-dlp failed for ${videoId}: ${e.message}`);
   }
 
-  // 2) Fallback: play-dl
+  // B. Cobalt (como fallback secundario ultra-veloz si yt-dlp falla)
   try {
-    const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
-      const search = await play.search(videoId, { limit: 1 });
-      return search[0] ? await play.video_info(search[0].url) : null;
-    });
-    if (info) {
-      const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
-      if (stream?.url) {
-        setCached(videoId, stream.url);
-        return stream.url;
-      }
+    const streamUrl = await resolveViaCobalt(videoId);
+    if (streamUrl) {
+      setCached(videoId, streamUrl);
+      return streamUrl;
     }
   } catch (e) {
-    console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
+    console.warn(`[stream] Cobalt fallback failed for ${videoId}: ${e.message}`);
   }
 
-  // 3) Fallback 2: Invidious API (útil para saltarse bloqueos en Render sin cookies)
+  // C. play-dl (solo si no es Render, para evitar hangs de IP blacklist)
+  if (!IS_RENDER) {
+    try {
+      const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
+        const search = await play.search(videoId, { limit: 1 });
+        return search[0] ? await play.video_info(search[0].url) : null;
+      });
+      if (info) {
+        const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
+        if (stream?.url) {
+          setCached(videoId, stream.url);
+          return stream.url;
+        }
+      }
+    } catch (e) {
+      console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
+    }
+  }
+
+  // D. Invidious fallback
   try {
     const streamUrl = await resolveViaInvidious(videoId);
     if (streamUrl) {
@@ -655,13 +736,19 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     }
 
     const getFinalStreamUrl = (url) => {
-      if (IS_RENDER) {
-        // En Render, no proxyar para evitar bloqueos de IP y ahorrar recursos (ancho de banda/RAM)
+      if (!url) return url;
+      
+      // Si ya es un túnel de Cobalt, lo devolvemos directo (no es IP bound y ahorra recursos de Render)
+      if (url.includes("mgytr.top") || url.includes("wolfy.love") || url.includes("clxxped.lol") || url.includes("qwkuns.me") || url.includes("cobalt")) {
         return url;
       }
-      if (url && (url.includes("googlevideo.com") || url.includes("youtube.com") || url.includes("youtu.be")) && req) {
+      
+      // Si es un stream directo de googlevideo (generado por yt-dlp/play-dl/Invidious), 
+      // DEBEMOS proxyarlo a través del servidor porque las URLs de Google Video están atadas a la IP que las resolvió.
+      if ((url.includes("googlevideo.com") || url.includes("youtube.com") || url.includes("youtu.be")) && req) {
         return `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(url)}`;
       }
+      
       return url;
     };
 
