@@ -24,6 +24,42 @@ const COOKIES_PATH = path.join(__dirname, "..", "..", "cookies.txt");
 
 // ── Cookies ──────────────────────────────────────────────────────────
 let cookiesActive = false;
+const cookieHealth = { ok: false, lastError: null, lastErrorAt: null, errorCount: 0 };
+
+const COOKIE_EXPIRY_PATTERNS = [
+  /sign in to confirm/i,
+  /sign in required/i,
+  /HTTP Error 429/i,
+  /HTTP Error 403/i,
+  /cookie.*expir/i,
+  /please sign in/i,
+  /bot.*(?:block|detect)/i,
+];
+
+function isCookieError(text) {
+  return COOKIE_EXPIRY_PATTERNS.some(p => p.test(text));
+}
+
+function markCookieError(errMsg) {
+  cookieHealth.lastError = errMsg;
+  cookieHealth.lastErrorAt = new Date().toISOString();
+  cookieHealth.errorCount++;
+  // Mark as expired after 3+ consecutive errors
+  if (cookieHealth.errorCount >= 3) {
+    cookieHealth.ok = false;
+    console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    console.error("[cookies] LAS COOKIES DE YOUTUBE EXPIRARON");
+    console.error("[cookies] Reexporta cookies.txt desde tu navegador");
+    console.error("[cookies] o actualiza la variable YT_COOKIES en Render");
+    console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+  }
+}
+
+function markCookieOk() {
+  cookieHealth.ok = true;
+  cookieHealth.errorCount = 0;
+}
+
 function loadCookies() {
   // 1) Escribir cookies desde variable de entorno (para Render)
   if (process.env.YT_COOKIES && !fs.existsSync(COOKIES_PATH)) {
@@ -49,6 +85,7 @@ function loadCookies() {
     });
 
     cookiesActive = true;
+    markCookieOk();
     console.log("[cookies] cookies.txt cargadas — extractor autenticado");
   } catch (e) {
     console.warn("[cookies] error al cargar cookies.txt:", e.message);
@@ -153,10 +190,13 @@ async function resolveStreamUrl(identifier) {
     const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`);
     if (streamUrl) {
       setCached(videoId, streamUrl);
+      if (cookiesActive) markCookieOk();
       return streamUrl;
     }
   } catch (e) {
-    console.warn(`[stream] yt-dlp failed for ${videoId}: ${e.message}`);
+    const msg = e.message;
+    if (isCookieError(msg)) markCookieError(msg);
+    console.warn(`[stream] yt-dlp failed for ${videoId}: ${msg}`);
   }
 
   // 2) Fallback: play-dl
@@ -169,11 +209,14 @@ async function resolveStreamUrl(identifier) {
       const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
       if (stream?.url) {
         setCached(videoId, stream.url);
+        if (cookiesActive) markCookieOk();
         return stream.url;
       }
     }
   } catch (e) {
-    console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
+    const msg = e.message;
+    if (isCookieError(msg)) markCookieError(msg);
+    console.warn(`[stream] play-dl failed for ${videoId}: ${msg}`);
   }
 
   return null;
@@ -202,7 +245,16 @@ app.get("/", (req, res) => {
 
 // API Health Check (Para el App Android)
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", service: "music-api" });
+  res.json({
+    status: "ok",
+    service: "music-api",
+    cookies: cookiesActive ? {
+      ok: cookieHealth.ok,
+      errorCount: cookieHealth.errorCount,
+      lastError: cookieHealth.lastError,
+      lastErrorAt: cookieHealth.lastErrorAt,
+    } : { ok: null, errorCount: 0, lastError: "no cookies configured" },
+  });
 });
 
 app.get("/api/search", requireApiKey, async (req, res) => {
