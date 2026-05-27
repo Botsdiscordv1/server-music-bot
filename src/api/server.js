@@ -282,6 +282,11 @@ app.get("/api/search", requireApiKey, async (req, res) => {
   }
 });
 
+function isExplicit(title, author) {
+  const text = `${title || ""} ${author || ""}`.toLowerCase();
+  return /\bexplicit\b/.test(text) && !/\bclean\b/.test(text);
+}
+
 async function searchLavalink(source, query) {
   const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(source + ":" + query)}`;
   const response = await axios.get(url, {
@@ -302,7 +307,7 @@ async function searchLavalink(source, query) {
     album: t.info?.albumName || t.pluginInfo?.albumName || null,
     albumUrl: t.pluginInfo?.albumUrl || null,
     isrc: t.info?.isrc || t.pluginInfo?.isrc || null,
-    explicit: t.info?.explicit === true,
+    explicit: isExplicit(t.info?.title, t.info?.author),
   }));
 }
 

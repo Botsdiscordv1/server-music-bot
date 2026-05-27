@@ -15,17 +15,24 @@ async function searchLavalink(source, query, limit = 5) {
   return (response.data?.data || []).slice(0, limit).map(formatLavalinkTrack);
 }
 
+function isExplicit(title, author) {
+  const text = `${title} ${author}`.toLowerCase();
+  return /\bexplicit\b/.test(text) && !/\bclean\b/.test(text);
+}
+
 function formatLavalinkTrack(t) {
+  const title = t.info?.title || "";
+  const author = t.info?.author || "";
   return {
     id: t.info?.identifier,
-    title: t.info?.title,
-    artist: t.info?.author,
+    title,
+    artist: author,
     album: t.info?.albumName || t.pluginInfo?.albumName || null,
     thumbnail: t.info?.artworkUrl,
     duration: t.info?.duration,
     uri: t.info?.uri,
     isrc: t.info?.isrc || null,
-    explicit: false,
+    explicit: isExplicit(title, author),
     genres: [],
   };
 }
