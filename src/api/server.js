@@ -25,6 +25,18 @@ const COOKIES_PATH = path.join(__dirname, "..", "..", "cookies.txt");
 // ── Cookies ──────────────────────────────────────────────────────────
 let cookiesActive = false;
 function loadCookies() {
+  // 1) Escribir cookies desde variable de entorno (para Render)
+  if (process.env.YT_COOKIES && !fs.existsSync(COOKIES_PATH)) {
+    try {
+      const decoded = Buffer.from(process.env.YT_COOKIES, "base64").toString("utf8");
+      fs.writeFileSync(COOKIES_PATH, decoded, "utf8");
+      console.log("[cookies] escritas desde YT_COOKIES env var");
+    } catch (e) {
+      console.warn("[cookies] error al decodificar YT_COOKIES:", e.message);
+    }
+  }
+
+  // 2) Cargar cookies desde archivo
   if (!fs.existsSync(COOKIES_PATH)) {
     console.log("[cookies] no cookies.txt found — extractor sin autenticar");
     return;
@@ -32,8 +44,6 @@ function loadCookies() {
   try {
     const raw = fs.readFileSync(COOKIES_PATH, "utf8");
 
-    // Pasar cookies a yt-dlp (vía flag --cookies)
-    // Pasar cookies a play-dl (vía setToken)
     play.setToken({
       youtube: { cookie: raw },
     });
