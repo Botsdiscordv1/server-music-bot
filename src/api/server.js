@@ -101,9 +101,10 @@ const { getCached, setCached } = (() => {
       // Si la URL contiene un parámetro de expiración (como las de YouTube)
       if (e.url && e.url.includes("expire=")) {
         try {
-          const urlObj = new URL(e.url);
-          const expireSec = parseInt(urlObj.searchParams.get("expire"));
-          if (expireSec) {
+          const decoded = e.url.includes("%") ? decodeURIComponent(e.url) : e.url;
+          const match = decoded.match(/[?&]expire=(\d+)/);
+          if (match) {
+            const expireSec = parseInt(match[1], 10);
             const nowSec = Math.floor(Date.now() / 1000);
             if (nowSec >= expireSec - 600) {
               mem.delete(key);
@@ -321,6 +322,13 @@ app.get("/api/proxy/audio", async (req, res) => {
     if (response.headers["accept-ranges"]) res.set("Accept-Ranges", response.headers["accept-ranges"]);
 
     response.data.pipe(res);
+
+    // Evitar fugas de sockets destruyendo el flujo de entrada cuando el cliente cierra la petición
+    res.on("close", () => {
+      if (response && response.data && typeof response.data.destroy === "function") {
+        response.data.destroy();
+      }
+    });
   } catch (e) {
     console.error("Proxy error:", e.message);
     res.status(502).json({ error: "Proxy fetch failed: " + (e.message || e) });
