@@ -201,6 +201,7 @@ const LAVALINK_PROTO = LAVALINK_SECURE ? "https" : "http";
 const LAVALINK_AUTH = process.env.LAVALINK_PASSWORD || "youshallnotpass";
 
 const app = express();
+app.set("trust proxy", 1); // Render usa proxy reverso con SSL
 app.use(express.json());
 app.use(passport.initialize());
 
