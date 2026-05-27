@@ -32,7 +32,24 @@ try {
 }
 
 const streamCache = new Map();
-const STREAM_CACHE_TTL = 30 * 60 * 1000; // 30 min
+const STREAM_CACHE_TTL = 2 * 60 * 60 * 1000; // 2 horas
+const STREAM_CACHE_MAX = 500;
+const searchCache = new Map();
+const SEARCH_CACHE_TTL = 10 * 60 * 1000; // 10 min
+const SEARCH_CACHE_MAX = 200;
+
+function cleanCache(cache, ttl, max) {
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (now - entry.ts > ttl) cache.delete(key);
+  }
+  if (cache.size > max) {
+    const entries = [...cache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    for (let i = 0; i < entries.length - max; i++) cache.delete(entries[i][0]);
+  }
+}
+setInterval(() => cleanCache(streamCache, STREAM_CACHE_TTL, STREAM_CACHE_MAX), 60_000);
+setInterval(() => cleanCache(searchCache, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX), 60_000);
 
 const LAVALINK_HOST = process.env.LAVALINK_HOST || "localhost";
 const LAVALINK_PORT = Number(process.env.LAVALINK_PORT) || 2333;
@@ -66,10 +83,16 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     const source = req.query.source || "ytmsearch";
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
 
-    const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(`${source}:${q}`)}`;
+    const cacheKey = `${source}:${q}`;
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < SEARCH_CACHE_TTL) {
+      return res.json(cached.data);
+    }
+
+    const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(cacheKey)}`;
     const response = await axios.get(url, {
       headers: { Authorization: LAVALINK_AUTH },
-      timeout: 10000,
+      timeout: 15000,
     });
 
     const tracks = (response.data?.data || []).map(t => ({
@@ -84,7 +107,9 @@ app.get("/api/search", requireApiKey, async (req, res) => {
       albumUrl: t.pluginInfo?.albumUrl || null,
     }));
 
-    res.json({ query: q, source, tracks });
+    const result = { query: q, source, tracks };
+    searchCache.set(cacheKey, { data: result, ts: Date.now() });
+    res.json(result);
   } catch (err) {
     console.error("Search Error:", err.message);
     res.status(500).json({ error: err.message });
