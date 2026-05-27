@@ -35,7 +35,6 @@ function ytDlpGetUrl(videoUrl) {
       "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
       "-g",
       "--no-warnings",
-      "--js-runtimes", "node",
       "--extractor-retries", "2",
       "--sleep-requests", "0.5",
       "--sleep-interval", "1",
@@ -180,6 +179,8 @@ setInterval(() => {
   }
 }, 600_000); // limpiar cada 10 min en lugar de cada 1 min
 
+let streamQueuePromise = Promise.resolve();
+
 async function resolveStreamUrl(identifier, req = null) {
   if (!identifier || typeof identifier !== "string") return null;
 
@@ -207,6 +208,30 @@ async function resolveStreamUrl(identifier, req = null) {
   const cached = getCached(videoId);
   if (cached) return cached;
 
+  // Encolar la resolución para garantizar que nunca se ejecuten procesos concurrentes de yt-dlp/play-dl
+  return new Promise((resolve) => {
+    streamQueuePromise = streamQueuePromise.then(async () => {
+      try {
+        const secondaryCache = getCached(videoId);
+        if (secondaryCache) {
+          resolve(secondaryCache);
+          return;
+        }
+        const streamUrl = await doResolveStreamUrl(videoId, req);
+        resolve(streamUrl);
+      } catch (err) {
+        resolve(null);
+      } finally {
+        // Liberar memoria forzando GC explícito en Render
+        if (global.gc) {
+          try { global.gc(); } catch {}
+        }
+      }
+    });
+  });
+}
+
+async function doResolveStreamUrl(videoId, req = null) {
   // 1) yt-dlp (emulación Android, sin cookies)
   try {
     const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`);
@@ -330,14 +355,17 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     searchCache.set(cacheKey, { data: result, ts: Date.now() });
     res.json(result);
 
-    // Pre-resolver streams en background
+    // Procesar en background
     setImmediate(async () => {
-      for (const track of tracks.slice(0, 3)) {
-        if (track.uri) {
-          try { await resolveStreamUrl(track.uri, req); } catch (e) {}
+      // 1) Pre-resolver streams en background (SOLO si no es Render, para ahorrar RAM)
+      if (!IS_RENDER) {
+        for (const track of tracks.slice(0, 3)) {
+          if (track.uri) {
+            try { await resolveStreamUrl(track.uri, req); } catch (e) {}
+          }
         }
       }
-      // Enriquecer portadas con Deezer en background
+      // 2) Enriquecer portadas con Deezer en background
       try {
         const enriched = await enrichArtworkWithDeezer(tracks);
         if (enriched.length) {
@@ -380,25 +408,28 @@ async function searchLavalink(source, query) {
 }
 
 async function enrichExplicitWithDeezerISRC(tracks) {
-  const lookups = tracks
-    .filter(t => t.isrc)
-    .map(async (track) => {
-      try {
-        const res = await axios.get(`https://api.deezer.com/track/isrc:${track.isrc}`, { timeout: 3000 });
-        if (res.data?.explicit_lyrics !== undefined) track.explicit = res.data.explicit_lyrics;
-      } catch (e) {}
-    });
+  // Limitar a los primeros 6 con ISRC para no saturar memoria/sockets
+  const targets = tracks.filter(t => t.isrc).slice(0, 6);
+  const lookups = targets.map(async (track) => {
+    try {
+      const res = await axios.get(`https://api.deezer.com/track/isrc:${track.isrc}`, { timeout: 3000 });
+      if (res.data?.explicit_lyrics !== undefined) track.explicit = res.data.explicit_lyrics;
+    } catch (e) {}
+  });
   await Promise.allSettled(lookups);
 }
 
 async function enrichArtworkWithDeezer(tracks) {
   const enriched = [...tracks];
-  for (const track of enriched) {
+  // Limitar enriquecimiento a los primeros 6 resultados para ahorrar RAM y peticiones HTTP
+  const limit = Math.min(enriched.length, 6);
+  for (let i = 0; i < limit; i++) {
+    const track = enriched[i];
     const needsArtwork = !track.artworkUrl?.startsWith("http") || track.artworkUrl?.includes("ytimg");
     if (!needsArtwork && track.explicit !== undefined) continue;
     try {
       const q = encodeURIComponent(`${track.artist} ${track.title}`);
-      const res = await axios.get(`https://api.deezer.com/search/track?q=${q}&limit=1`, { timeout: 5000 });
+      const res = await axios.get(`https://api.deezer.com/search/track?q=${q}&limit=1`, { timeout: 3000 });
       const data = res.data?.data?.[0];
       if (data) {
         if (data.album?.cover_medium) {
@@ -436,7 +467,7 @@ app.get("/api/spotify/search/albums", requireApiKey, async (req, res) => {
   }
 });
 
-const WARM_CONCURRENCY = 3;
+const WARM_CONCURRENCY = IS_RENDER ? 1 : 3;
 
 app.post("/api/warm", requireApiKey, async (req, res) => {
   try {
