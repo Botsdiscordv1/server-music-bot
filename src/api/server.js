@@ -758,14 +758,7 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     const getFinalStreamUrl = (url) => {
       if (!url) return url;
       
-      // Si ya es un túnel de Cobalt, lo devolvemos directo (no es IP bound y ahorra recursos de Render)
-      if (url.includes("mgytr.top") || url.includes("wolfy.love") || url.includes("clxxped.lol") || url.includes("qwkuns.me") || url.includes("cobalt")) {
-        return url;
-      }
-      
-      // Si es un stream directo de googlevideo (generado por yt-dlp/play-dl/Invidious), 
-      // DEBEMOS proxyarlo a través del servidor porque las URLs de Google Video están atadas a la IP que las resolvió.
-      if ((url.includes("googlevideo.com") || url.includes("youtube.com") || url.includes("youtu.be")) && req) {
+      if (req) {
         return `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(url)}`;
       }
       
