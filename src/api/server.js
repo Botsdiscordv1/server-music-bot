@@ -1088,7 +1088,11 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
         if (!query) continue;
 
         try {
-          const tracks = await searchLavalink("ytsearch", query);
+          // ytmsearch retorna versiones oficiales de YouTube Music (mejor para videos oficiales)
+          // Pedimos 20 candidatos para tener más opciones al aplicar el scoring
+          let tracks = await searchLavalink("ytmsearch", query, 20);
+          // Fallback a ytsearch si ytmsearch no retorna nada
+          if (!tracks.length) tracks = await searchLavalink("ytsearch", query, 20);
           console.log(`[liked-videos] Query "${query}" → ${tracks.length} tracks`);
           if (!tracks.length) { errors.push({ query, reason: "no_tracks" }); continue; }
 
