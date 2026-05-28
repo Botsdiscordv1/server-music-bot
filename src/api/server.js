@@ -1201,10 +1201,26 @@ app.delete("/api/recent-playback/:userId", requireApiKey, async (req, res) => {
 app.post("/api/sync", requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
+    const mongoId = req.mongoId;
     const source = req.provider || "android";
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const result = await db.syncUserData(userId, req.body, source);
+
+    const UserModel = source === "discord" && DiscordUser ? DiscordUser : User;
+    const user = await UserModel.findById(mongoId).lean();
+    if (user) {
+      result.user = {
+        id: user._id.toString(),
+        username: user.username,
+        email: user.email,
+        avatar: user.avatar,
+        discordId: user.discordId,
+        googleId: user.googleId,
+        createdAt: user.createdAt,
+      };
+    }
+
     res.json(result);
   } catch (err) {
     console.error("Sync Error:", err.stack);
@@ -1358,21 +1374,12 @@ app.get("/api/auth/discord", passport.authenticate("discord", { session: false }
 
 app.get("/api/auth/discord/callback", (req, res, next) => {
   passport.authenticate("discord", { session: false }, (err, user) => {
+    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
     if (err || !user) {
-      const url = process.env.CLIENT_URL || "musicapp://auth";
-      return res.redirect(`${url}?error=auth_failed`);
+      return res.redirect(`${clientUrl}?error=auth_failed`);
     }
     const token = signToken(user, "discord");
-    const userB64 = Buffer.from(JSON.stringify(user.toPublicJSON())).toString("base64");
-    const tokenB64 = Buffer.from(token).toString("base64");
-    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
-    const redirectUrl = `${clientUrl}?token=${encodeURIComponent(token)}&user=${encodeURIComponent(userB64)}`;
-    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Login exitoso</title></head><body><script>
-var d=JSON.parse(atob("${userB64}")),t=atob("${tokenB64}");
-try{window.opener&&window.opener.postMessage(JSON.stringify({token:t,user:d}),'*')}catch(e){}
-try{window.location.href="${redirectUrl}"}catch(e){}
-setTimeout(function(){window.close()},1e3);
-</script></body></html>`);
+    res.redirect(`${clientUrl}?token=${encodeURIComponent(token)}`);
   })(req, res, next);
 });
 
