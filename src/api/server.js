@@ -1123,7 +1123,7 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
 
               // 1. Existing baseline scoring rules
               if (author.includes("vevo")) score += 200;
-              if (title.includes("official")) score += 100;
+              if (title.includes("official") || title.includes("oficial")) score += 100;
               if (author.includes("topic")) score -= 100;
 
               // 2. Prioritize official channels / verified artist profiles
@@ -1149,7 +1149,14 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
               if (trackHasFeat && !songHasFeat) {
                 score -= 150; // Heavily penalize since the video has a featuring artist but the original song does not
               } else if (songHasFeat && !trackHasFeat) {
-                score -= 50;  // Moderately penalize since the original song has a featured artist but the video does not
+                // If the Spotify metadata has featuring artists but the YouTube title doesn't contain "feat/ft",
+                // check if the names of the featured artists are at least present in the YouTube title.
+                const featPart = (song.track_title.match(/\((?:feat|ft|featuring)\.?\s+([^\)]+)\)/i)?.[1] || "").toLowerCase();
+                const featWords = featPart.split(/[\s&,]+/).filter(w => w.length > 2);
+                const hasFeatNames = featWords.length > 0 && featWords.every(word => title.includes(word));
+                if (!hasFeatNames) {
+                  score -= 50; // Only penalize if the featured artists' names are also missing in the YouTube title
+                }
               }
 
               // 4. Critical musical variant matching (remix, acoustic, live, slowed, cover, etc.)
@@ -1206,15 +1213,19 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
               const videoWords = cleanWords(title);
 
               // Penalizar palabras extrañas que no están en los metadatos originales
+              const isRemix = songTitle.includes("remix");
               videoWords.forEach(word => {
                 if (!originalWords.has(word)) {
                   // Evitamos penalizar términos de estado oficial positivos que ya dan bonus
-                  const isPositiveWord = ["official", "oficial", "vevo", "audio", "video"].includes(word);
+                  const isPositiveWord = ["official", "oficial", "vevo", "audio", "video", "music"].includes(word);
                   if (!isPositiveWord) {
                     if (parenWords.has(word)) {
                       score -= 40; // Penalización fuerte para palabras extrañas entre paréntesis/corchetes (ej: [remix], (cover))
                     } else {
-                      score -= 10; // Penalización leve para otras palabras extrañas fuera de paréntesis
+                      // Si es un Remix, no penalizamos palabras fuera de paréntesis, ya que suelen listar muchos artistas invitados
+                      if (!isRemix) {
+                        score -= 10; // Penalización leve para otras palabras extrañas fuera de paréntesis
+                      }
                     }
                   }
                 }
