@@ -752,6 +752,223 @@ async function clearRecentPlayback(userId, source = "android") {
   return { changes: res.deletedCount };
 }
 
+// ── Sync ──────────────────────────────────────────────────────────────────────
+async function syncUserData(userId, localData, source = "android") {
+  const { LikedSong, Playlist, DislikedSong, FollowedArtist, LikedAlbum, TrackPlay } = getModels(source);
+  await whenReady(() => {});
+  const result = {};
+
+  // 1. Liked Songs
+  if (Array.isArray(localData.likedSongs)) {
+    const cloudDocs = await LikedSong.find({ userId }).lean();
+    const cloudUrls = new Set(cloudDocs.map(s => s.trackUrl).filter(Boolean));
+    let added = 0;
+    for (const song of localData.likedSongs) {
+      if (song.trackUrl && cloudUrls.has(song.trackUrl)) continue;
+      try {
+        await LikedSong.create({
+          userId,
+          trackTitle: song.trackTitle || song.track_title || "",
+          trackAuthor: cleanAuthor(song.trackAuthor || song.track_author || ""),
+          trackUrl: song.trackUrl || song.track_url || "",
+          trackDuration: song.trackDuration || song.track_duration || 0,
+          artworkUrl: song.artworkUrl || song.artwork_url || "",
+          isrc: song.isrc || undefined,
+          explicit: song.explicit || false,
+          genres: song.genres || [],
+        });
+        added++;
+      } catch {}
+    }
+    const all = await LikedSong.find({ userId }).sort({ likedAt: -1 }).lean();
+    result.likedSongs = all.map(s => ({
+      id: s._id.toString(),
+      track_title: s.trackTitle,
+      track_author: s.trackAuthor,
+      track_url: s.trackUrl,
+      track_duration: s.trackDuration,
+      artwork_url: s.artworkUrl,
+      isrc: s.isrc,
+      explicit: s.explicit || false,
+      genres: s.genres || [],
+      liked_at: s.likedAt,
+    }));
+    result.likedSongsAdded = added;
+  }
+
+  // 2. Recent Playback
+  if (Array.isArray(localData.recentPlayback)) {
+    const Model = getRecentPlaybackModel(userId, source);
+    let added = 0;
+    for (const item of localData.recentPlayback) {
+      const title = item.trackTitle || item.track_title || "";
+      if (!title) continue;
+      try {
+        await Model.create({
+          userId,
+          trackTitle: title,
+          trackAuthor: cleanAuthor(item.trackAuthor || item.track_author || ""),
+          trackUrl: item.trackUrl || item.track_url || "",
+          trackDuration: item.trackDuration || item.track_duration || 0,
+          artworkUrl: item.artworkUrl || item.artwork_url || "",
+          playedAt: item.playedAt || item.played_at || new Date(),
+        });
+        added++;
+      } catch {}
+    }
+    const all = await Model.find({ userId }).sort({ playedAt: -1 }).limit(200).lean();
+    result.recentPlayback = all.map(d => ({
+      id: d._id.toString(),
+      track_title: d.trackTitle,
+      track_author: d.trackAuthor,
+      track_url: d.trackUrl,
+      track_duration: d.trackDuration,
+      artwork_url: d.artworkUrl,
+      played_at: d.playedAt,
+    }));
+    result.recentPlaybackAdded = added;
+  }
+
+  // 3. Playlists
+  if (Array.isArray(localData.playlists)) {
+    const cloudDocs = await Playlist.find({ userId }).lean();
+    const cloudNames = new Set(cloudDocs.map(p => p.name));
+    let added = 0;
+    for (const pl of localData.playlists) {
+      const name = pl.name || "";
+      if (!name || cloudNames.has(name)) continue;
+      try {
+        await Playlist.create({ userId, name, tracks: pl.tracks || [] });
+        added++;
+      } catch {}
+    }
+    const all = await Playlist.find({ userId }).sort({ createdAt: -1 }).lean();
+    result.playlists = all.map(p => ({
+      id: p._id.toString(),
+      name: p.name,
+      tracks: p.tracks,
+      created_at: p.createdAt,
+    }));
+    result.playlistsAdded = added;
+  }
+
+  // 4. Disliked Songs
+  if (Array.isArray(localData.dislikedSongs)) {
+    const cloudDocs = await DislikedSong.find({ userId }).lean();
+    const cloudKeys = new Set(cloudDocs.map(d => d.trackKey));
+    let added = 0;
+    for (const d of localData.dislikedSongs) {
+      const title = d.trackTitle || d.track_title || "";
+      const author = d.trackAuthor || d.track_author || "";
+      const key = `${cleanAuthor(author)} - ${title}`.trim();
+      if (!key || cloudKeys.has(key)) continue;
+      try {
+        await DislikedSong.create({
+          userId,
+          trackTitle: title,
+          trackAuthor: author,
+          trackUrl: d.trackUrl || d.track_url || "",
+          trackKey: key,
+        });
+        added++;
+      } catch {}
+    }
+    const all = await DislikedSong.find({ userId }).sort({ dislikedAt: -1 }).lean();
+    result.dislikedSongs = all.map(d => ({
+      id: d._id.toString(),
+      track_title: d.trackTitle,
+      track_author: d.trackAuthor,
+      track_url: d.trackUrl,
+      track_key: d.trackKey,
+      disliked_at: d.dislikedAt,
+    }));
+    result.dislikedSongsAdded = added;
+  }
+
+  // 5. Followed Artists
+  if (Array.isArray(localData.followedArtists)) {
+    const cloudDocs = await FollowedArtist.find({ userId }).lean();
+    const cloudIds = new Set(cloudDocs.map(a => a.artistId));
+    let added = 0;
+    for (const a of localData.followedArtists) {
+      if (!a.artistId || cloudIds.has(a.artistId)) continue;
+      try {
+        await FollowedArtist.create({
+          userId,
+          artistId: a.artistId,
+          artistName: a.artistName || a.artist_name || "",
+          imageUrl: a.imageUrl || a.image_url || "",
+        });
+        added++;
+      } catch {}
+    }
+    const all = await FollowedArtist.find({ userId }).sort({ followedAt: -1 }).lean();
+    result.followedArtists = all.map(a => ({
+      id: a._id.toString(),
+      artistId: a.artistId,
+      artist_name: a.artistName,
+      image_url: a.imageUrl,
+      followed_at: a.followedAt,
+    }));
+    result.followedArtistsAdded = added;
+  }
+
+  // 6. Liked Albums
+  if (Array.isArray(localData.likedAlbums)) {
+    const cloudDocs = await LikedAlbum.find({ userId }).lean();
+    const cloudIds = new Set(cloudDocs.map(a => a.albumId));
+    let added = 0;
+    for (const a of localData.likedAlbums) {
+      if (!a.albumId || cloudIds.has(a.albumId)) continue;
+      try {
+        await LikedAlbum.create({
+          userId,
+          albumId: a.albumId,
+          albumName: a.albumName || a.album_name || "",
+          artistName: a.artistName || a.artist_name || "",
+          artworkUrl: a.artworkUrl || a.artwork_url || "",
+          albumUrl: a.albumUrl || a.album_url || "",
+        });
+        added++;
+      } catch {}
+    }
+    const all = await LikedAlbum.find({ userId }).sort({ likedAt: -1 }).lean();
+    result.likedAlbums = all.map(a => ({
+      id: a._id.toString(),
+      albumId: a.albumId,
+      album_name: a.albumName,
+      artist_name: a.artistName,
+      artwork_url: a.artworkUrl,
+      album_url: a.albumUrl,
+      liked_at: a.likedAt,
+    }));
+    result.likedAlbumsAdded = added;
+  }
+
+  // 7. Stats (accumulate)
+  if (localData.stats) {
+    const s = localData.stats;
+    const inc = {};
+    if (s.tracksPlayed || s.tracks_played) inc.tracksPlayed = s.tracksPlayed || s.tracks_played;
+    if (s.totalListenTime || s.total_listen_time) inc.totalListenTime = s.totalListenTime || s.total_listen_time;
+    if (Object.keys(inc).length) {
+      const update = { $inc: inc };
+      if (s.favoriteArtist || s.favorite_artist) update.$set = { favoriteArtist: cleanAuthor(s.favoriteArtist || s.favorite_artist) };
+      if (s.lastPlayed || s.last_played) update.$set = { ...(update.$set || {}), lastPlayed: s.lastPlayed || s.last_played };
+      await UserStats.findOneAndUpdate({ userId }, update, { upsert: true });
+    }
+    const statsDoc = await UserStats.findOne({ userId }).lean();
+    result.stats = statsDoc ? {
+      tracks_played: statsDoc.tracksPlayed,
+      total_listen_time: statsDoc.totalListenTime,
+      favorite_artist: statsDoc.favoriteArtist,
+      last_played: statsDoc.lastPlayed,
+    } : null;
+  }
+
+  return result;
+}
+
 module.exports = {
   initDB,
   updateUserStats,
@@ -796,4 +1013,5 @@ module.exports = {
   addRecentPlayback,
   getRecentPlayback,
   clearRecentPlayback,
+  syncUserData,
 };

@@ -1197,6 +1197,21 @@ app.delete("/api/recent-playback/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+// ── Sync ──────────────────────────────────────────────────────────────────────
+app.post("/api/sync", requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const result = await db.syncUserData(userId, req.body, source);
+    res.json(result);
+  } catch (err) {
+    console.error("Sync Error:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Auth routes ──────────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 const JWT_EXPIRES = "30d";
@@ -1348,8 +1363,16 @@ app.get("/api/auth/discord/callback", (req, res, next) => {
       return res.redirect(`${url}?error=auth_failed`);
     }
     const token = signToken(user, "discord");
-    const url = process.env.CLIENT_URL || "musicapp://auth";
-    res.redirect(`${url}?token=${token}`);
+    const userB64 = Buffer.from(JSON.stringify(user.toPublicJSON())).toString("base64");
+    const tokenB64 = Buffer.from(token).toString("base64");
+    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+    const redirectUrl = `${clientUrl}?token=${encodeURIComponent(token)}&user=${encodeURIComponent(userB64)}`;
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Login exitoso</title></head><body><script>
+var d=JSON.parse(atob("${userB64}")),t=atob("${tokenB64}");
+try{window.opener&&window.opener.postMessage(JSON.stringify({token:t,user:d}),'*')}catch(e){}
+try{window.location.href="${redirectUrl}"}catch(e){}
+setTimeout(function(){window.close()},1e3);
+</script></body></html>`);
   })(req, res, next);
 });
 
