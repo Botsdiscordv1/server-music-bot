@@ -1099,16 +1099,82 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
             .filter(t => {
               const title = (t.title || "").toLowerCase();
               const bad = ["cover", "karaoke", "instrumental", "tribute", "remix", "8bit", "8-bit", "16bit", "16-bit", "sped up", "speed up", "nightcore", "slowed", "acapella", "a cappella"];
-              return !bad.some(w => title.includes(w));
+              return !bad.some(w => title.includes(w) && !songTitle.includes(w));
             })
             .map(t => {
               const title = (t.title || "").toLowerCase();
               const author = (t.author || "").toLowerCase();
               let score = 0;
 
+              // 1. Existing baseline scoring rules
               if (author.includes("vevo")) score += 200;
               if (title.includes("official")) score += 100;
               if (author.includes("topic")) score -= 100;
+
+              // 2. Prioritize official channels / verified artist profiles
+              const cleanArtist = song.track_author.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+              const cleanAuthor = author.replace(/\s*-\s*topic$/, "").replace(/[^a-z0-9]/g, "").trim();
+              
+              const isVerifiedArtist = 
+                author.includes("vevo") || 
+                cleanAuthor === cleanArtist || 
+                cleanAuthor.includes(cleanArtist + "official") ||
+                cleanAuthor.includes(cleanArtist + "vevo") ||
+                author.includes("official artist channel") ||
+                t.info?.verified === true ||
+                t.verified === true;
+
+              if (isVerifiedArtist) {
+                score += 150; // Give a nice bonus for official channels / verified artist profiles
+              }
+
+              // 3. Check for featuring mismatches (feat, ft, featuring)
+              const songHasFeat = /\b(feat|ft|featuring)\b/i.test(songTitle);
+              const trackHasFeat = /\b(feat|ft|featuring)\b/i.test(title);
+              if (trackHasFeat && !songHasFeat) {
+                score -= 150; // Heavily penalize since the video has a featuring artist but the original song does not
+              } else if (songHasFeat && !trackHasFeat) {
+                score -= 50;  // Moderately penalize since the original song has a featured artist but the video does not
+              }
+
+              // 4. Penalize any words in the video title that are not in the original song metadata (title/author)
+              const cleanWords = (str) => {
+                return (str || "")
+                  .toLowerCase()
+                  .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/gi, " ")
+                  .split(/\s+/)
+                  .filter(w => w.length > 2); // Ignore short words (<= 2 chars) to avoid false penalties on articles
+              };
+
+              const originalWords = new Set([
+                ...cleanWords(song.track_title),
+                ...cleanWords(song.track_author)
+              ]);
+
+              // Extraer palabras dentro de paréntesis/corchetes para penalizarlas más fuertemente si no están en los metadatos
+              const parenTextMatches = title.match(/[\(\[][^\)\]]+[\)\]]/g) || [];
+              const parenWords = new Set();
+              parenTextMatches.forEach(match => {
+                cleanWords(match).forEach(w => parenWords.add(w));
+              });
+
+              // Obtener todas las palabras del título del video
+              const videoWords = cleanWords(title);
+
+              // Penalizar palabras extrañas que no están en los metadatos originales
+              videoWords.forEach(word => {
+                if (!originalWords.has(word)) {
+                  // Evitamos penalizar términos de estado oficial positivos que ya dan bonus
+                  const isPositiveWord = ["official", "oficial", "vevo", "audio", "video"].includes(word);
+                  if (!isPositiveWord) {
+                    if (parenWords.has(word)) {
+                      score -= 40; // Penalización fuerte para palabras extrañas entre paréntesis/corchetes (ej: [remix], (cover))
+                    } else {
+                      score -= 10; // Penalización leve para otras palabras extrañas fuera de paréntesis
+                    }
+                  }
+                }
+              });
 
               if (dur > 0 && t.duration > 0) {
                 const ratio = Math.min(dur, t.duration) / Math.max(dur, t.duration);
