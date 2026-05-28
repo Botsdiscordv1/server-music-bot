@@ -1197,6 +1197,35 @@ app.delete("/api/recent-playback/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+// ── Init (carga inicial premium: perfil + todos los datos) ─────────────
+app.get("/api/init", requireAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const mongoId = req.mongoId;
+    const source = req.provider || "android";
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const [userData, likedSongs, likedAlbums, followedArtists, playlists, recentPlayback, stats] = await Promise.all([
+      (async () => {
+        const UserModel = source === "discord" && DiscordUser ? DiscordUser : User;
+        const u = await UserModel.findById(mongoId).lean();
+        return u ? { id: u._id.toString(), username: u.username, email: u.email, avatar: u.avatar, discordId: u.discordId, googleId: u.googleId, createdAt: u.createdAt } : null;
+      })(),
+      db.getLikedSongs(userId, 200, source).catch(() => []),
+      db.getLikedAlbums(userId, source).catch(() => []),
+      db.getFollowedArtists(userId, source).catch(() => []),
+      db.getUserPlaylists(userId, source).catch(() => []),
+      db.getRecentPlayback(userId, 50, source).catch(() => []),
+      db.getUserStats(userId, source).catch(() => null),
+    ]);
+
+    res.json({ user: userData, likedSongs, likedAlbums, followedArtists, playlists, recentPlayback, stats });
+  } catch (err) {
+    console.error("Init Error:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Sync ──────────────────────────────────────────────────────────────────────
 app.post("/api/sync", requireAuth, async (req, res) => {
   try {
@@ -1374,11 +1403,34 @@ app.get("/api/auth/discord", passport.authenticate("discord", { session: false }
 
 app.get("/api/auth/discord/callback", (req, res, next) => {
   passport.authenticate("discord", { session: false }, (err, user) => {
-    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
     if (err || !user) {
-      return res.redirect(`${clientUrl}?error=auth_failed`);
+      return res.status(401).json({ error: "auth_failed" });
     }
     const token = signToken(user, "discord");
+    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+
+    // App (HTTP nativo): JSON directo. Navegador/WebView: 302 redirect
+    const ua = (req.headers["user-agent"] || "").toLowerCase();
+    if (ua.includes("okhttp") || ua.includes("dalvik")) {
+      return res.json({ token, user: user.toPublicJSON() });
+    }
+    res.redirect(`${clientUrl}?token=${encodeURIComponent(token)}`);
+  })(req, res, next);
+});
+
+app.get("/api/auth/google/callback", (req, res, next) => {
+  passport.authenticate("google", { session: false }, (err, user) => {
+    if (err || !user) {
+      console.error("[Google OAuth] Error:", err?.message);
+      return res.status(401).json({ error: "auth_failed" });
+    }
+    const token = signToken(user);
+    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+
+    const ua = (req.headers["user-agent"] || "").toLowerCase();
+    if (ua.includes("okhttp") || ua.includes("dalvik")) {
+      return res.json({ token, user: user.toPublicJSON() });
+    }
     res.redirect(`${clientUrl}?token=${encodeURIComponent(token)}`);
   })(req, res, next);
 });
@@ -1434,13 +1486,19 @@ app.get("/api/auth/google",
 
 app.get("/api/auth/google/callback", (req, res, next) => {
   passport.authenticate("google", { session: false }, (err, user) => {
-    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
     if (err || !user) {
       console.error("[Google OAuth] Error:", err?.message);
-      return res.redirect(`${clientUrl}?error=auth_failed&provider=google`);
+      return res.status(401).json({ error: "auth_failed" });
     }
     const token = signToken(user);
-    return res.redirect(`${clientUrl}?token=${token}&provider=google`);
+    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+
+    const ua = (req.headers["user-agent"] || "").toLowerCase();
+    if (ua.includes("android") || ua.includes("okhttp") || ua.includes("dalvik")) {
+      return res.json({ token, user: user.toPublicJSON() });
+    }
+
+    res.redirect(`${clientUrl}?token=${encodeURIComponent(token)}`);
   })(req, res, next);
 });
 
