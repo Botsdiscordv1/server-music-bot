@@ -124,11 +124,14 @@ if (youtubeCookieString) {
   }
 }
 
-function ytDlpGetUrl(videoUrl) {
+function ytDlpGetUrl(videoUrl, isVideo = false) {
   return new Promise((resolve, reject) => {
+    const format = isVideo 
+      ? "best[ext=mp4]/best" 
+      : "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best";
     const args = [
       videoUrl,
-      "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+      "-f", format,
       "-g",
       "--no-warnings",
       "--extractor-retries", "2",
@@ -290,7 +293,7 @@ setInterval(() => {
 
 let streamQueuePromise = Promise.resolve();
 
-async function resolveStreamUrl(identifier, req = null, forceRefresh = false) {
+async function resolveStreamUrl(identifier, req = null, forceRefresh = false, isVideo = false) {
   if (!identifier || typeof identifier !== "string") return null;
 
   // URL de audio directa (Deezer, etc.) → proxylar por el backend
@@ -314,14 +317,16 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false) {
   if (!videoId) videoId = await extractVideoIdFromLavalink(identifier);
   if (!videoId) return null;
 
+  const cacheKey = isVideo ? `${videoId}:video` : videoId;
+
   if (forceRefresh) {
-    failedVideoIds.delete(videoId);
-  } else if (failedVideoIds.has(videoId)) {
+    failedVideoIds.delete(cacheKey);
+  } else if (failedVideoIds.has(cacheKey)) {
     return null;
   }
 
   if (!forceRefresh) {
-    const cached = getCached(videoId);
+    const cached = getCached(cacheKey);
     if (cached) return cached;
   }
 
@@ -330,13 +335,13 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false) {
     streamQueuePromise = streamQueuePromise.then(async () => {
       try {
         if (!forceRefresh) {
-          const secondaryCache = getCached(videoId);
+          const secondaryCache = getCached(cacheKey);
           if (secondaryCache) {
             resolve(secondaryCache);
             return;
           }
         }
-        const streamUrl = await doResolveStreamUrl(videoId, req);
+        const streamUrl = await doResolveStreamUrl(videoId, req, isVideo);
         resolve(streamUrl);
       } catch (err) {
         resolve(null);
@@ -350,7 +355,7 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false) {
   });
 }
 
-async function resolveViaCobalt(videoId) {
+async function resolveViaCobalt(videoId, isVideo = false) {
   const instances = [
     "https://apicobalt.mgytr.top",
     "https://cobalt.alpha.wolfy.love",
@@ -360,12 +365,19 @@ async function resolveViaCobalt(videoId) {
   
   for (const instance of instances) {
     try {
-      console.log(`[stream] Trying Cobalt instance: ${instance} for video ${videoId}`);
-      const res = await axios.post(instance, {
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        audioFormat: "best",
-        downloadMode: "audio"
-      }, {
+      console.log(`[stream] Trying Cobalt instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
+      const payload = {
+        url: `https://www.youtube.com/watch?v=${videoId}`
+      };
+      if (isVideo) {
+        payload.downloadMode = "progressive";
+        payload.videoQuality = "720";
+      } else {
+        payload.downloadMode = "audio";
+        payload.audioFormat = "best";
+      }
+      
+      const res = await axios.post(instance, payload, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
@@ -385,7 +397,7 @@ async function resolveViaCobalt(videoId) {
   return null;
 }
 
-async function resolveViaInvidious(videoId) {
+async function resolveViaInvidious(videoId, isVideo = false) {
   const instances = [
     "https://yewtu.be",
     "https://invidious.flokinet.to",
@@ -397,18 +409,37 @@ async function resolveViaInvidious(videoId) {
 
   for (const instance of instances) {
     try {
-      console.log(`[stream] Trying Invidious instance: ${instance} for video ${videoId}`);
+      console.log(`[stream] Trying Invidious instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
       const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, { timeout: 6000 });
-      if (res.data && res.data.adaptiveFormats) {
-        // Encontrar formatos de audio
-        const audioFormats = res.data.adaptiveFormats.filter(f => f.type && f.type.startsWith("audio/"));
-        if (audioFormats.length > 0) {
-          // Ordenar por bitrate descendente para obtener la mejor calidad
-          audioFormats.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
-          const bestAudio = audioFormats[0];
-          if (bestAudio.url) {
-            console.log(`[stream] Success resolving ${videoId} via Invidious (${instance})`);
-            return bestAudio.url;
+      
+      if (isVideo) {
+        if (res.data && res.data.formatStreams) {
+          const videoStreams = res.data.formatStreams;
+          if (videoStreams.length > 0) {
+            videoStreams.sort((a, b) => {
+              const resA = parseInt(a.qualityLabel) || 0;
+              const resB = parseInt(b.qualityLabel) || 0;
+              return resB - resA;
+            });
+            const bestVideo = videoStreams[0];
+            if (bestVideo.url) {
+              console.log(`[stream] Success resolving video ${videoId} via Invidious (${instance})`);
+              return bestVideo.url;
+            }
+          }
+        }
+      } else {
+        if (res.data && res.data.adaptiveFormats) {
+          // Encontrar formatos de audio
+          const audioFormats = res.data.adaptiveFormats.filter(f => f.type && f.type.startsWith("audio/"));
+          if (audioFormats.length > 0) {
+            // Ordenar por bitrate descendente para obtener la mejor calidad
+            audioFormats.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
+            const bestAudio = audioFormats[0];
+            if (bestAudio.url) {
+              console.log(`[stream] Success resolving ${videoId} via Invidious (${instance})`);
+              return bestAudio.url;
+            }
           }
         }
       }
@@ -419,16 +450,17 @@ async function resolveViaInvidious(videoId) {
   return null;
 }
 
-async function doResolveStreamUrl(videoId, req = null) {
+async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const hasCookies = fs.existsSync(COOKIES_PATH);
+  const cacheKey = isVideo ? `${videoId}:video` : videoId;
 
   // 1) En Render, si no hay cookies, saltamos directo a Cobalt para máxima velocidad y evitar bloqueos
   if (IS_RENDER && !hasCookies) {
-    console.log(`[stream] Running on Render without cookies. Prioritizing Cobalt for ${videoId}`);
+    console.log(`[stream] Running on Render without cookies. Prioritizing Cobalt for ${videoId} (isVideo=${isVideo})`);
     try {
-      const streamUrl = await resolveViaCobalt(videoId);
+      const streamUrl = await resolveViaCobalt(videoId, isVideo);
       if (streamUrl) {
-        setCached(videoId, streamUrl);
+        setCached(cacheKey, streamUrl);
         return streamUrl;
       }
     } catch (e) {
@@ -437,16 +469,16 @@ async function doResolveStreamUrl(videoId, req = null) {
     
     // Fallback: Invidious
     try {
-      const streamUrl = await resolveViaInvidious(videoId);
+      const streamUrl = await resolveViaInvidious(videoId, isVideo);
       if (streamUrl) {
-        setCached(videoId, streamUrl);
+        setCached(cacheKey, streamUrl);
         return streamUrl;
       }
     } catch (e) {
       console.warn(`[stream] Invidious fallback failed on Render: ${e.message}`);
     }
     
-    failedVideoIds.set(videoId, Date.now());
+    failedVideoIds.set(cacheKey, Date.now());
     return null;
   }
 
@@ -454,9 +486,9 @@ async function doResolveStreamUrl(videoId, req = null) {
   
   // A. yt-dlp
   try {
-    const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`);
+    const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`, isVideo);
     if (streamUrl) {
-      setCached(videoId, streamUrl);
+      setCached(cacheKey, streamUrl);
       return streamUrl;
     }
   } catch (e) {
@@ -465,17 +497,17 @@ async function doResolveStreamUrl(videoId, req = null) {
 
   // B. Cobalt (como fallback secundario ultra-veloz si yt-dlp falla)
   try {
-    const streamUrl = await resolveViaCobalt(videoId);
+    const streamUrl = await resolveViaCobalt(videoId, isVideo);
     if (streamUrl) {
-      setCached(videoId, streamUrl);
+      setCached(cacheKey, streamUrl);
       return streamUrl;
     }
   } catch (e) {
     console.warn(`[stream] Cobalt fallback failed for ${videoId}: ${e.message}`);
   }
 
-  // C. play-dl (solo si no es Render, para evitar hangs de IP blacklist)
-  if (!IS_RENDER) {
+  // C. play-dl (solo si no es Render, y solo si NO es video, ya que play-dl es principalmente audio)
+  if (!IS_RENDER && !isVideo) {
     try {
       const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
         const search = await play.search(videoId, { limit: 1 });
@@ -484,7 +516,7 @@ async function doResolveStreamUrl(videoId, req = null) {
       if (info) {
         const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
         if (stream?.url) {
-          setCached(videoId, stream.url);
+          setCached(cacheKey, stream.url);
           return stream.url;
         }
       }
@@ -495,16 +527,16 @@ async function doResolveStreamUrl(videoId, req = null) {
 
   // D. Invidious fallback
   try {
-    const streamUrl = await resolveViaInvidious(videoId);
+    const streamUrl = await resolveViaInvidious(videoId, isVideo);
     if (streamUrl) {
-      setCached(videoId, streamUrl);
+      setCached(cacheKey, streamUrl);
       return streamUrl;
     }
   } catch (e) {
     console.warn(`[stream] Invidious fallback failed for ${videoId}: ${e.message}`);
   }
 
-  failedVideoIds.set(videoId, Date.now());
+  failedVideoIds.set(cacheKey, Date.now());
   return null;
 }
 
@@ -748,12 +780,14 @@ app.post("/api/warm", requireApiKey, async (req, res) => {
 
 app.get("/api/stream", requireApiKey, async (req, res) => {
   try {
-    const { id, title, artist, refresh } = req.query;
+    const { id, title, artist, refresh, video } = req.query;
     if (!id || id === "undefined" || id === "null" || id.trim() === "") {
       return res.status(400).json({ error: "Missing or invalid 'id' parameter" });
     }
 
     const forceRefresh = refresh === "true" || refresh === "1";
+    const isVideo = video === "true" || video === "1" || video === "video" ||
+                    id.includes("youtube_video") || id.includes("videoUrl") || id.includes(":video");
 
     const getFinalStreamUrl = (url) => {
       if (!url) return url;
@@ -780,11 +814,12 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       }
       if (query && query !== "-") {
         try {
-          const tracks = await searchLavalink("ytmsearch", query);
+          const searchSource = isVideo ? "ytsearch" : "ytmsearch";
+          const tracks = await searchLavalink(searchSource, query);
           if (tracks.length) {
-            const streamUrl = await resolveStreamUrl(tracks[0].uri, req, forceRefresh);
+            const streamUrl = await resolveStreamUrl(tracks[0].uri, req, forceRefresh, isVideo);
             if (streamUrl) {
-              return res.json({ url: getFinalStreamUrl(streamUrl), resolvedFrom: "ytm" });
+              return res.json({ url: getFinalStreamUrl(streamUrl), resolvedFrom: isVideo ? "yt" : "ytm" });
             }
           }
         } catch (e) {
@@ -794,7 +829,7 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.status(404).json({ error: "Cannot resolve Deezer/Spotify URI" });
     }
 
-    const streamUrl = await resolveStreamUrl(id, req, forceRefresh);
+    const streamUrl = await resolveStreamUrl(id, req, forceRefresh, isVideo);
     if (streamUrl) {
       return res.json({ url: getFinalStreamUrl(streamUrl) });
     }
