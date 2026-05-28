@@ -1073,11 +1073,13 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 20, 50);
 
     const songs = await db.getLikedSongs(userId, limit, source);
+    console.log(`[liked-videos] Found ${songs.length} liked songs for ${userId}`);
     if (!songs.length) return res.json({ videos: [] });
 
     const CONCURRENCY = 3;
     const videos = [];
     const queue = [...songs];
+    const errors = [];
 
     const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
       while (queue.length > 0) {
@@ -1087,7 +1089,8 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
 
         try {
           const tracks = await searchLavalink("ytsearch", query);
-          if (!tracks.length) continue;
+          console.log(`[liked-videos] Query "${query}" → ${tracks.length} tracks`);
+          if (!tracks.length) { errors.push({ query, reason: "no_tracks" }); continue; }
 
           const songTitle = song.track_title.toLowerCase();
           const dur = song.track_duration || 0;
@@ -1119,6 +1122,7 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
 
           const best = scored[0];
           if (best) {
+            console.log(`[liked-videos] Best for "${query}": "${best.track.title}" (score ${best.score})`);
             const t = best.track;
             const vid = t.id || t.uri?.match(/v=([a-zA-Z0-9_-]{11})/)?.[1];
             if (vid) {
@@ -1130,13 +1134,15 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
                 thumbnail: t.artworkUrl || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
                 duration: t.duration || song.track_duration,
               });
-            }
-          }
-        } catch (e) {}
+            } else { errors.push({ query, reason: "no_video_id" }); }
+          } else { errors.push({ query, reason: "all_filtered" }); }
+        } catch (e) { errors.push({ query, reason: e.message }); }
       }
     });
 
     await Promise.all(workers);
+    console.log(`[liked-videos] Returning ${videos.length} videos for ${userId}`);
+    if (errors.length) console.log(`[liked-videos] Errors:`, JSON.stringify(errors.slice(0, 10)));
     res.json({ videos });
   } catch (err) {
     console.error("Liked Videos Error:", err.stack);
