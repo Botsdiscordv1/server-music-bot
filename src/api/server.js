@@ -1066,6 +1066,84 @@ app.get("/api/top-tracks/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+
+    const songs = await db.getLikedSongs(userId, limit, source);
+    if (!songs.length) return res.json({ videos: [] });
+
+    const CONCURRENCY = 3;
+    const videos = [];
+    const queue = [...songs];
+
+    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const song = queue.shift();
+        const query = `${song.track_author} ${song.track_title}`.trim();
+        if (!query) continue;
+
+        try {
+          const tracks = await searchLavalink("ytsearch", query);
+          if (!tracks.length) continue;
+
+          const songTitle = song.track_title.toLowerCase();
+          const dur = song.track_duration || 0;
+
+          const scored = tracks
+            .filter(t => {
+              const title = (t.title || "").toLowerCase();
+              const bad = ["cover", "karaoke", "instrumental", "tribute", "remix", "8bit", "8-bit", "16bit", "16-bit", "sped up", "speed up", "nightcore", "slowed", "acapella", "a cappella"];
+              return !bad.some(w => title.includes(w));
+            })
+            .map(t => {
+              const title = (t.title || "").toLowerCase();
+              const author = (t.author || "").toLowerCase();
+              let score = 0;
+
+              if (author.includes("vevo")) score += 200;
+              if (title.includes("official")) score += 100;
+              if (author.includes("topic")) score -= 100;
+
+              if (dur > 0 && t.duration > 0) {
+                const ratio = Math.min(dur, t.duration) / Math.max(dur, t.duration);
+                if (ratio > 0.85) score += 60;
+                else if (ratio > 0.7) score += 20;
+              }
+
+              return { track: t, score };
+            })
+            .sort((a, b) => b.score - a.score);
+
+          const best = scored[0];
+          if (best) {
+            const t = best.track;
+            const vid = t.id || t.uri?.match(/v=([a-zA-Z0-9_-]{11})/)?.[1];
+            if (vid) {
+              videos.push({
+                title: song.track_title,
+                artist: song.track_author,
+                videoId: vid,
+                videoUrl: `https://www.youtube.com/watch?v=${vid}`,
+                thumbnail: t.artworkUrl || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+                duration: t.duration || song.track_duration,
+              });
+            }
+          }
+        } catch (e) {}
+      }
+    });
+
+    await Promise.all(workers);
+    res.json({ videos });
+  } catch (err) {
+    console.error("Liked Videos Error:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Auth routes ──────────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 const JWT_EXPIRES = "30d";
