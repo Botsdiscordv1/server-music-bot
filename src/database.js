@@ -691,6 +691,67 @@ async function getAllLikedSongsWithBadUrls(source = "android") {
     }));
 }
 
+// ── Recent Playback ──────────────────────────────────────────────────────────
+const recentPlaybackSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  trackTitle: String,
+  trackAuthor: String,
+  trackUrl: String,
+  trackDuration: Number,
+  artworkUrl: String,
+  playedAt: { type: Date, default: Date.now },
+});
+recentPlaybackSchema.index({ playedAt: -1 });
+
+const recentPlaybackModels = new Map();
+
+function getRecentPlaybackModel(userId, source = "android") {
+  const key = `${source}:${userId}`;
+  if (recentPlaybackModels.has(key)) return recentPlaybackModels.get(key);
+
+  const collectionName = `recent_playback_${userId}`;
+  const conn = source === "discord" && discordConn ? discordConn : mongoose.connection;
+  const model = conn.model(collectionName, recentPlaybackSchema, collectionName);
+  recentPlaybackModels.set(key, model);
+  return model;
+}
+
+async function addRecentPlayback(userId, track, source = "android") {
+  const Model = getRecentPlaybackModel(userId, source);
+  await whenReady(() => {});
+  return Model.create({
+    userId,
+    trackTitle: track.info?.title || track.trackTitle,
+    trackAuthor: cleanAuthor(track.info?.author || track.trackAuthor || ""),
+    trackUrl: track.info?.uri || track.trackUrl,
+    trackDuration: track.info?.duration || track.trackDuration,
+    artworkUrl: track.info?.artworkUrl || track.artworkUrl,
+  });
+}
+
+async function getRecentPlayback(userId, limit = 50, source = "android") {
+  const Model = getRecentPlaybackModel(userId, source);
+  await whenReady(() => {});
+  const docs = await Model.find({ userId }).sort({ playedAt: -1 }).limit(limit).lean();
+  return docs.map(doc => ({
+    id: doc._id.toString(),
+    user_id: doc.userId,
+    track_title: doc.trackTitle,
+    track_author: doc.trackAuthor,
+    track_url: doc.trackUrl,
+    track_duration: doc.trackDuration,
+    artwork_url: doc.artworkUrl,
+    played_at: doc.playedAt,
+  }));
+}
+
+async function clearRecentPlayback(userId, source = "android") {
+  const Model = getRecentPlaybackModel(userId, source);
+  await whenReady(() => {});
+  const res = await Model.deleteMany({ userId });
+  return { changes: res.deletedCount };
+}
+
 module.exports = {
   initDB,
   updateUserStats,
@@ -732,4 +793,7 @@ module.exports = {
   getAllLikedSongsWithBadUrls,
   BAD_URI_REGEX,
   DiscordUser,
+  addRecentPlayback,
+  getRecentPlayback,
+  clearRecentPlayback,
 };

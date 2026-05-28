@@ -1150,6 +1150,53 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+app.get("/api/recent-playback/:userId", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const playback = await db.getRecentPlayback(userId, limit, source);
+    res.json({ playback });
+  } catch (err) {
+    console.error("Recent Playback Error:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/recent-playback/:userId", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const { trackTitle, trackAuthor, trackUrl, trackDuration, artworkUrl } = req.body;
+    if (!trackTitle) return res.status(400).json({ error: "trackTitle is required" });
+
+    const track = {
+      trackTitle,
+      trackAuthor: trackAuthor || "",
+      trackUrl: trackUrl || "",
+      trackDuration: trackDuration || 0,
+      artworkUrl: artworkUrl || "",
+    };
+    await db.addRecentPlayback(userId, track, source);
+    res.json({ added: true });
+  } catch (err) {
+    console.error("Recent Playback Error:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/recent-playback/:userId", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+    const result = await db.clearRecentPlayback(userId, source);
+    res.json(result);
+  } catch (err) {
+    console.error("Recent Playback Error:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Auth routes ──────────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 const JWT_EXPIRES = "30d";
