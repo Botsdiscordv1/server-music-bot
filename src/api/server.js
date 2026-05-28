@@ -1099,7 +1099,22 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
             .filter(t => {
               const title = (t.title || "").toLowerCase();
               const bad = ["cover", "karaoke", "instrumental", "tribute", "remix", "8bit", "8-bit", "16bit", "16-bit", "sped up", "speed up", "nightcore", "slowed", "acapella", "a cappella"];
-              return !bad.some(w => title.includes(w) && !songTitle.includes(w));
+              const passesBadWords = !bad.some(w => title.includes(w) && !songTitle.includes(w));
+              if (!passesBadWords) return false;
+
+              // Ensure at least one keyword of the original song title is present in the video title
+              let songTitleKeywords = songTitle
+                .replace(/[^a-z0-9áéíóúàèìòùâêîôûãõçñ\s]/gi, " ")
+                .split(/\s+/)
+                .filter(w => w.length > 2);
+              
+              if (!songTitleKeywords.length) {
+                songTitleKeywords = songTitle.split(/\s+/).filter(Boolean);
+              }
+
+              // Check if at least one keyword matches
+              const hasKeywordMatch = songTitleKeywords.some(word => title.includes(word));
+              return hasKeywordMatch;
             })
             .map(t => {
               const title = (t.title || "").toLowerCase();
@@ -1136,6 +1151,35 @@ app.get("/api/liked-videos/:userId", requireApiKey, async (req, res) => {
               } else if (songHasFeat && !trackHasFeat) {
                 score -= 50;  // Moderately penalize since the original song has a featured artist but the video does not
               }
+
+              // 4. Critical musical variant matching (remix, acoustic, live, slowed, cover, etc.)
+              const criticalVariants = [
+                "remix", "acoustic", "live", "slowed", "sped up", "speed up", "nightcore", "reverb", "8bit", "8-bit",
+                "16bit", "16-bit", "acapella", "a cappella", "tribute", "piano", "instrumental", "orchestral", "stripped",
+                "demo", "radio edit", "extended", "club mix", "dub mix", "rework", "karaoke", "cover"
+              ];
+
+              criticalVariants.forEach(variant => {
+                const songHasVariant = new RegExp(`\\b${variant}\\b`, "i").test(songTitle);
+                const trackHasVariant = new RegExp(`\\b${variant}\\b`, "i").test(title);
+
+                if (trackHasVariant && !songHasVariant) {
+                  score -= 250; // Massively penalize acoustic/remix/live version when original is a normal track
+                } else if (songHasVariant && !trackHasVariant) {
+                  score -= 250; // Massively penalize normal version when original is a remix/acoustic/live track
+                }
+              });
+
+              // 5. Lyric video vs actual music video/audio matching
+              const lyricVariants = ["lyric", "lyrics", "letra", "visualizer"];
+              lyricVariants.forEach(lyric => {
+                const songHasLyric = new RegExp(`\\b${lyric}\\b`, "i").test(songTitle);
+                const trackHasLyric = new RegExp(`\\b${lyric}\\b`, "i").test(title);
+
+                if (trackHasLyric && !songHasLyric) {
+                  score -= 120; // Penalize lyric video if the original song isn't explicitly a lyric version
+                }
+              });
 
               // 4. Penalize any words in the video title that are not in the original song metadata (title/author)
               const cleanWords = (str) => {
