@@ -759,7 +759,7 @@ app.get("/api/search/video", requireApiKey, async (req, res) => {
       };
     });
 
-    const result = { query: q, tracks };
+    const result = { query: q, source: "ytsearch", tracks };
     searchCache.set(cacheKey, { data: result, ts: Date.now() });
     res.json(result);
   } catch (err) {
