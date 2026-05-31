@@ -1149,6 +1149,23 @@ app.delete("/api/recent-playback/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+app.post("/api/history/:userId/sync", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId || req.params.userId;
+    const source = req.provider || "android";
+
+    if (!Array.isArray(req.body)) {
+      return res.status(400).json({ error: "Request body must be an array of HistoryEntryDto" });
+    }
+
+    const synced = await db.syncHistory(userId, req.body, source);
+    res.json({ count: synced.length, history: synced });
+  } catch (err) {
+    console.error("Sync History Error:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Init (carga inicial premium: perfil + todos los datos) ─────────────
 app.get("/api/init", requireAuth, async (req, res) => {
   try {

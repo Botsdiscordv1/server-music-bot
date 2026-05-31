@@ -969,6 +969,43 @@ async function syncUserData(userId, localData, source = "android") {
   return result;
 }
 
+async function syncHistory(userId, historyEntries, source = "android") {
+  const { History } = getModels(source);
+  await whenReady(() => {});
+
+  if (!Array.isArray(historyEntries)) {
+    return [];
+  }
+
+  const docsToInsert = [];
+  for (const entry of historyEntries) {
+    const title = entry.trackTitle || entry.track_title;
+    if (!title) continue;
+
+    docsToInsert.push({
+      userId,
+      trackTitle: title,
+      trackAuthor: cleanAuthor(entry.trackAuthor || entry.track_author || ""),
+      trackUrl: entry.trackUrl || entry.track_url || "",
+      trackDuration: entry.trackDuration || entry.track_duration || 0,
+      playedAt: new Date(),
+    });
+  }
+
+  if (docsToInsert.length === 0) return [];
+
+  const createdDocs = await History.insertMany(docsToInsert);
+  return createdDocs.map(doc => ({
+    id: doc._id.toString(),
+    user_id: doc.userId,
+    track_title: doc.trackTitle,
+    track_author: doc.trackAuthor,
+    track_url: doc.trackUrl,
+    track_duration: doc.trackDuration,
+    played_at: doc.playedAt,
+  }));
+}
+
 module.exports = {
   initDB,
   updateUserStats,
@@ -981,6 +1018,7 @@ module.exports = {
   addToHistory,
   getHistory,
   clearHistory,
+  syncHistory,
   addLikedSong,
   removeLikedSong,
   removeLikedSongByTrack,
