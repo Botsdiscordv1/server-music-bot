@@ -31,6 +31,24 @@ GET /api/search?q=<query>&source=ytmsearch
   }
 
 ====================================================================
+2b. BUSCAR VIDEOS (YouTube — ytsearch)
+====================================================================
+GET /api/search/video?q=<query>
+→ {
+    "query": "...",
+    "tracks": [
+      {
+        "uri": "https://youtube.com/watch?v=...",
+        "artworkUrl": "https://i.ytimg.com/.../maxresdefault.jpg",
+        "author": "Nombre canal/artista",
+        "title": "Título del video"
+      }
+    ]
+  }
+Nota: artworkUrl es maxresdefault.jpg cuando está disponible.
+Cache: 5 min (igual que /api/search).
+
+====================================================================
 3. LETRAS (LRCLib + Genius fallback)
 ====================================================================
 GET /api/lyrics?track=<titulo>&artist=<artista>&album=<album>

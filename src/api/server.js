@@ -726,6 +726,48 @@ async function enrichArtworkWithDeezer(tracks) {
   return enriched;
 }
 
+// ── Video Search (YouTube) ────────────────────────────────────────────
+// GET /api/search/video?q=<query>
+// Returns: { query, tracks: [{ uri, artworkUrl, author, title }] }
+app.get("/api/search/video", requireApiKey, async (req, res) => {
+  try {
+    const q = req.query.q;
+    if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
+
+    const cacheKey = `ytsearch:video:${q}`;
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < SEARCH_CACHE_TTL) {
+      return res.json(cached.data);
+    }
+
+    const raw = await searchLavalink("ytsearch", q);
+
+    // Normalise to the 4 fields the Android app needs.
+    // Upgrade YouTube thumbnails to maxresdefault when possible.
+    const tracks = raw.map((t) => {
+      let artworkUrl = t.artworkUrl || "";
+      // ytimg thumbnails: swap any quality suffix for maxresdefault
+      if (artworkUrl.includes("ytimg.com")) {
+        artworkUrl = artworkUrl
+          .replace(/\/(hqdefault|mqdefault|sddefault|default|maxresdefault)(\.jpg(\?.*)?)?$/, "/maxresdefault.jpg");
+      }
+      return {
+        uri: t.uri,
+        artworkUrl,
+        author: t.author,
+        title: t.title,
+      };
+    });
+
+    const result = { query: q, tracks };
+    searchCache.set(cacheKey, { data: result, ts: Date.now() });
+    res.json(result);
+  } catch (err) {
+    console.error("[search/video] Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/spotify/search", requireApiKey, async (req, res) => {
   try {
     const q = req.query.q;
