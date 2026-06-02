@@ -6,6 +6,190 @@ const LAVALINK_SECURE = process.env.LAVALINK_SECURE === "true";
 const LAVALINK_PROTO = LAVALINK_SECURE ? "https" : "http";
 const LAVALINK_AUTH = process.env.LAVALINK_PASSWORD || "youshallnotpass";
 
+// ── Spotify Web API direct (OAuth Client Credentials) ─────────────
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+let spotifyToken = null;
+let spotifyTokenExpiry = 0;
+
+async function getSpotifyToken() {
+  if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
+  try {
+    const res = await axios.post("https://accounts.spotify.com/api/token",
+      "grant_type=client_credentials",
+      {
+        headers: {
+          "Authorization": "Basic " + Buffer.from(SPOTIFY_CLIENT_ID + ":" + SPOTIFY_CLIENT_SECRET).toString("base64"),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        timeout: 10000,
+      }
+    );
+    spotifyToken = res.data.access_token;
+    spotifyTokenExpiry = Date.now() + (res.data.expires_in - 60) * 1000;
+    return spotifyToken;
+  } catch (err) {
+    console.error("[Spotify API] Token error:", err.message);
+    throw err;
+  }
+}
+
+async function spotifyFetch(endpoint) {
+  const token = await getSpotifyToken();
+  const res = await axios.get(`https://api.spotify.com/v1${endpoint}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    timeout: 10000,
+  });
+  return res.data;
+}
+
+async function searchArtistsDirect(query, limit = 5) {
+  const data = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=artist&limit=${Math.min(limit, 50)}`);
+  return (data.artists?.items || []).map(a => ({
+    id: a.id,
+    name: a.name,
+    image: a.images?.[0]?.url || null,
+    genres: a.genres || [],
+    popularity: a.popularity,
+    followers: a.followers?.total || 0,
+    uri: a.uri,
+    externalUrl: a.external_urls?.spotify || null,
+  }));
+}
+
+async function getArtistInfo(artistId) {
+  const a = await spotifyFetch(`/artists/${artistId}`);
+  return {
+    id: a.id,
+    name: a.name,
+    images: a.images || [],
+    genres: a.genres || [],
+    popularity: a.popularity,
+    followers: a.followers?.total || 0,
+    uri: a.uri,
+    externalUrl: a.external_urls?.spotify || null,
+  };
+}
+
+async function getArtistDescription(name) {
+  if (!name) return null;
+  // Intentar Wikipedia primero (directo y con búsqueda)
+  const wikiResult = await tryWikipediaDescription(name);
+  if (wikiResult) return wikiResult;
+
+  // Fallback: DuckDuckGo Instant Answer API
+  try {
+    const ddg = await axios.get("https://api.duckduckgo.com/", {
+      params: { q: name + " music", format: "json", no_html: 1, skip_disambig: 1 },
+      timeout: 5000,
+    });
+    const data = ddg.data;
+    if (data.Abstract) {
+      return { description: data.Abstract, source: "duckduckgo", url: data.AbstractURL || null };
+    }
+  } catch {}
+
+  return null;
+}
+
+async function tryWikipediaDescription(name) {
+  try {
+    const res = await axios.get("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(name), {
+      timeout: 6000,
+      headers: { "User-Agent": "ServerMusic/2.0" },
+    });
+    if (res.data && res.data.extract && !res.data.extract.includes("may refer to")) {
+      return {
+        description: res.data.extract,
+        source: "wikipedia",
+        url: res.data.content_urls?.desktop?.page || null,
+      };
+    }
+  } catch {}
+  // fallback: search wikipedia
+  try {
+    const searchRes = await axios.get("https://en.wikipedia.org/w/api.php", {
+      params: {
+        action: "query", list: "search", srsearch: name + " musician",
+        format: "json", srlimit: 1,
+      },
+      timeout: 6000,
+    });
+    const title = searchRes.data?.query?.search?.[0]?.title;
+    if (title) {
+      const res2 = await axios.get("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(title), {
+        timeout: 6000,
+        headers: { "User-Agent": "ServerMusic/2.0" },
+      });
+      if (res2.data?.extract) {
+        return {
+          description: res2.data.extract,
+          source: "wikipedia",
+          url: res2.data.content_urls?.desktop?.page || null,
+        };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+async function searchArtistDeezer(name) {
+  if (!name) return null;
+  try {
+    const res = await axios.get(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=5`, { timeout: 5000 });
+    const artist = (res.data?.data || []).map(a => ({
+      id: String(a.id),
+      name: a.name,
+      image: a.picture_medium || null,
+      imageBig: a.picture_big || null,
+      imageXl: a.picture_xl || null,
+      fans: a.nb_fan || 0,
+      albums: a.nb_album || 0,
+      tracklist: a.tracklist || null,
+    }))[0] || null;
+
+    // Si Deezer no encontró el artista o no tiene imagen, buscar imagen vía YTM/Lavalink
+    if (!artist || !artist.image) {
+      const ytmImage = await searchArtistImageYTM(name);
+      if (ytmImage) {
+        if (artist) {
+          artist.image = ytmImage;
+          artist.imageBig = ytmImage;
+        } else {
+          return { id: null, name, image: ytmImage, imageBig: ytmImage, imageXl: ytmImage, fans: 0, albums: 0, tracklist: null };
+        }
+      }
+    }
+    return artist;
+  } catch {
+    const ytmImage = await searchArtistImageYTM(name);
+    if (ytmImage) {
+      return { id: null, name, image: ytmImage, imageBig: ytmImage, imageXl: ytmImage, fans: 0, albums: 0, tracklist: null };
+    }
+    return null;
+  }
+}
+
+async function searchArtistImageYTM(name) {
+  if (!name) return null;
+  try {
+    const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent("ytmsearch:" + name + " artist")}`;
+    const response = await axios.get(url, {
+      headers: { Authorization: LAVALINK_AUTH },
+      timeout: 10000,
+    });
+    const tracks = response.data?.data || [];
+    // Buscar el track cuyo autor coincida exactamente (sin distinguir mayúsculas)
+    const nameLower = name.toLowerCase();
+    const match = tracks.find(t => t.info?.author?.toLowerCase() === nameLower)
+      || tracks.find(t => t.info?.author?.toLowerCase().includes(nameLower))
+      || tracks[0];
+    return match?.info?.artworkUrl || null;
+  } catch {
+    return null;
+  }
+}
+
 async function searchLavalink(source, query, limit = 5) {
   const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(source + ":" + query)}`;
   const response = await axios.get(url, {
@@ -191,4 +375,8 @@ module.exports = {
   getArtists,
   getArtistTopTracks,
   getTrackOembed,
+  searchArtistsDirect,
+  getArtistInfo,
+  getArtistDescription,
+  searchArtistDeezer,
 };

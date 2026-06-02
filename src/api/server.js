@@ -792,6 +792,30 @@ app.get("/api/spotify/search/albums", requireApiKey, async (req, res) => {
   }
 });
 
+app.get("/api/spotify/search/artists", requireApiKey, async (req, res) => {
+  try {
+    const q = req.query.q;
+    const limit = Math.min(parseInt(req.query.limit) || 5, 20);
+    if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
+    const artists = await spotify.searchArtistsDirect(q, limit);
+    res.json({ query: q, artists, source: "spotify" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/spotify/artist/:id", requireApiKey, async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: "Missing artist id" });
+    const info = await spotify.getArtistInfo(id);
+    const desc = await spotify.getArtistDescription(info.name);
+    res.json({ ...info, description: desc });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const WARM_CONCURRENCY = IS_RENDER ? 1 : 3;
 
 app.post("/api/warm", requireApiKey, async (req, res) => {
@@ -1114,6 +1138,38 @@ app.get("/api/artist-image", requireApiKey, async (req, res) => {
     res.json({ url });
   } catch (err) {
     res.json({ url: null });
+  }
+});
+
+app.get("/api/artist/info", requireApiKey, async (req, res) => {
+  try {
+    const name = req.query.name;
+    if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
+
+    const [deezerInfo, description] = await Promise.all([
+      spotify.searchArtistDeezer(name),
+      spotify.getArtistDescription(name),
+    ]);
+
+    if (!deezerInfo && !description) {
+      return res.status(404).json({ error: "Artist not found" });
+    }
+
+    res.json({
+      name: deezerInfo?.name || name,
+      image: deezerInfo?.image || null,
+      imageBig: deezerInfo?.imageBig || null,
+      imageXl: deezerInfo?.imageXl || null,
+      fans: deezerInfo?.fans || 0,
+      albums: deezerInfo?.albums || 0,
+      description: description?.description || null,
+      descriptionSource: description?.source || null,
+      descriptionUrl: description?.url || null,
+      source: "deezer+wikipedia",
+    });
+  } catch (err) {
+    console.error("[artist/info] Error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
