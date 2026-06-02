@@ -11,6 +11,9 @@ const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 let spotifyToken = null;
 let spotifyTokenExpiry = 0;
+let spotifyDown = false;
+let spotifyDownChecked = 0;
+const SPOTIFY_RETRY_AFTER = 5 * 60 * 1000; // 5 min antes de reintentar
 
 async function getSpotifyToken() {
   if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
@@ -44,17 +47,26 @@ async function spotifyFetch(endpoint) {
 }
 
 async function searchArtistsDirect(query, limit = 5) {
-  const data = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=artist&limit=${Math.min(limit, 50)}`);
-  return (data.artists?.items || []).map(a => ({
-    id: a.id,
-    name: a.name,
-    image: a.images?.[0]?.url || null,
-    genres: a.genres || [],
-    popularity: a.popularity,
-    followers: a.followers?.total || 0,
-    uri: a.uri,
-    externalUrl: a.external_urls?.spotify || null,
-  }));
+  if (spotifyDown && Date.now() - spotifyDownChecked < SPOTIFY_RETRY_AFTER) return [];
+  try {
+    const data = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=artist&limit=${Math.min(limit, 50)}`);
+    spotifyDown = false; // si llegó acá es porque Spotify respondió bien
+    return (data.artists?.items || []).map(a => ({
+      id: a.id,
+      name: a.name,
+      image: a.images?.[0]?.url || null,
+      genres: a.genres || [],
+      popularity: a.popularity,
+      followers: a.followers?.total || 0,
+      uri: a.uri,
+      externalUrl: a.external_urls?.spotify || null,
+    }));
+  } catch (err) {
+    spotifyDown = true;
+    spotifyDownChecked = Date.now();
+    console.error("[Spotify API] Error:", err.message);
+    return [];
+  }
 }
 
 async function getArtistInfo(artistId) {
@@ -73,11 +85,14 @@ async function getArtistInfo(artistId) {
 
 async function getArtistDescription(name) {
   if (!name) return null;
-  // Intentar Wikipedia primero (directo y con búsqueda)
-  const wikiResult = await tryWikipediaDescription(name);
-  if (wikiResult) return wikiResult;
+  // 1) English Wikipedia
+  const wikiEn = await tryWikipediaDescription(name, "en");
+  if (wikiEn) return wikiEn;
+  // 2) Spanish Wikipedia (importante para artistas latinos como 3 AM)
+  const wikiEs = await tryWikipediaDescription(name, "es");
+  if (wikiEs) return wikiEs;
 
-  // Fallback: DuckDuckGo Instant Answer API
+  // 3) Fallback: DuckDuckGo Instant Answer API
   try {
     const ddg = await axios.get("https://api.duckduckgo.com/", {
       params: { q: name + " music", format: "json", no_html: 1, skip_disambig: 1 },
@@ -92,42 +107,47 @@ async function getArtistDescription(name) {
   return null;
 }
 
-async function tryWikipediaDescription(name) {
+async function tryWikipediaDescription(name, lang = "en") {
+  const baseUrl = `https://${lang}.wikipedia.org`;
+  // 1) Direct summary lookup
   try {
-    const res = await axios.get("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(name), {
+    const res = await axios.get(`${baseUrl}/api/rest_v1/page/summary/${encodeURIComponent(name)}`, {
       timeout: 6000,
       headers: { "User-Agent": "ServerMusic/2.0" },
     });
-    if (res.data && res.data.extract && !res.data.extract.includes("may refer to")) {
+    if (res.data && res.data.extract && res.data.type !== "disambiguation") {
       return {
         description: res.data.extract,
-        source: "wikipedia",
+        source: `wikipedia(${lang})`,
         url: res.data.content_urls?.desktop?.page || null,
       };
     }
   } catch {}
-  // fallback: search wikipedia
+  // 2) Fallback: search Wikipedia for up to 5 results, skip disambiguation
   try {
-    const searchRes = await axios.get("https://en.wikipedia.org/w/api.php", {
+    const searchRes = await axios.get(`${baseUrl}/w/api.php`, {
       params: {
-        action: "query", list: "search", srsearch: name + " musician",
-        format: "json", srlimit: 1,
+        action: "query", list: "search",
+        srsearch: `${name} musician`,
+        format: "json", srlimit: 5,
       },
       timeout: 6000,
     });
-    const title = searchRes.data?.query?.search?.[0]?.title;
-    if (title) {
-      const res2 = await axios.get("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(title), {
-        timeout: 6000,
-        headers: { "User-Agent": "ServerMusic/2.0" },
-      });
-      if (res2.data?.extract) {
-        return {
-          description: res2.data.extract,
-          source: "wikipedia",
-          url: res2.data.content_urls?.desktop?.page || null,
-        };
-      }
+    const pages = searchRes.data?.query?.search || [];
+    for (const page of pages) {
+      try {
+        const res2 = await axios.get(`${baseUrl}/api/rest_v1/page/summary/${encodeURIComponent(page.title)}`, {
+          timeout: 6000,
+          headers: { "User-Agent": "ServerMusic/2.0" },
+        });
+        if (res2.data?.extract && res2.data.type !== "disambiguation") {
+          return {
+            description: res2.data.extract,
+            source: `wikipedia(${lang})`,
+            url: res2.data.content_urls?.desktop?.page || null,
+          };
+        }
+      } catch {}
     }
   } catch {}
   return null;
@@ -135,59 +155,152 @@ async function tryWikipediaDescription(name) {
 
 async function searchArtistDeezer(name) {
   if (!name) return null;
-  try {
-    const res = await axios.get(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=5`, { timeout: 5000 });
-    const artist = (res.data?.data || []).map(a => ({
-      id: String(a.id),
-      name: a.name,
-      image: a.picture_medium || null,
-      imageBig: a.picture_big || null,
-      imageXl: a.picture_xl || null,
-      fans: a.nb_fan || 0,
-      albums: a.nb_album || 0,
-      tracklist: a.tracklist || null,
-    }))[0] || null;
+  const cleanName = cleanArtistName(name);
+  if (!cleanName) return null;
 
-    // Si Deezer no encontró el artista o no tiene imagen, buscar imagen vía YTM/Lavalink
-    if (!artist || !artist.image) {
-      const ytmImage = await searchArtistImageYTM(name);
-      if (ytmImage) {
-        if (artist) {
-          artist.image = ytmImage;
-          artist.imageBig = ytmImage;
-        } else {
-          return { id: null, name, image: ytmImage, imageBig: ytmImage, imageXl: ytmImage, fans: 0, albums: 0, tracklist: null };
+  const queries = [cleanName];
+  if (cleanName !== name) queries.push(name);
+
+  for (const q of queries) {
+    try {
+      const res = await axios.get(`https://api.deezer.com/search/artist?q=${encodeURIComponent(q)}&limit=10`, { timeout: 5000 });
+      const candidates = (res.data?.data || []).map(a => ({
+        id: String(a.id),
+        name: a.name,
+        image: a.picture_medium || null,
+        imageBig: a.picture_big || null,
+        imageXl: a.picture_xl || null,
+        fans: a.nb_fan || 0,
+        albums: a.nb_album || 0,
+        tracklist: a.tracklist || null,
+      }));
+
+      // Encontrar candidatos que coincidan y elegir el de más fans
+      const nameLower = cleanName.toLowerCase();
+      const queryWords = nameLower.split(/\s+/).filter(Boolean).filter(w => w.length >= 3);
+      const queryNorm = nameLower.replace(/\s+/g, "");
+      const matched = candidates.filter(a => {
+        const an = a.name.toLowerCase();
+        const artistNorm = an.replace(/\s+/g, "");
+        // 1) exact match
+        if (an === nameLower) return true;
+        // 2) uno contiene al otro (con y sin espacios)
+        if (an.includes(nameLower) || nameLower.includes(an)) return true;
+        if (artistNorm.includes(queryNorm) || queryNorm.includes(artistNorm)) return true;
+        // 3) palabras de 3+ chars como palabra completa (evita "milo" ⊆ "milow")
+        for (const w of queryWords) {
+          const re = new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i");
+          if (re.test(an)) return true;
         }
+        return false;
+      });
+      matched.sort((a, b) => b.fans - a.fans);
+      let artist = matched[0] || null;
+
+      if (artist) {
+        if (!artist.image) {
+          const img = await searchArtistImageAll(cleanName);
+          if (img) {
+            artist.image = img;
+            artist.imageBig = img;
+          }
+        }
+        console.log(`[searchArtistDeezer] "${q}" → match:"${artist.name}" img:${artist.image ? "✓" : "✗"} fans:${artist.fans}`);
+        return artist;
       }
-    }
-    return artist;
+    } catch {}
+  }
+
+  // Fallback total: probar todas las fuentes de imagen
+  const image = await searchArtistImageAll(cleanName);
+  if (image) {
+    return { id: null, name: cleanName, image, imageBig: image, imageXl: image, fans: 0, albums: 0, tracklist: null };
+  }
+  return null;
+}
+
+async function searchArtistImageSpotify(name) {
+  if (!name) return null;
+  try {
+    const spotifyArtists = await searchArtistsDirect(name, 5);
+    const nameLower = name.toLowerCase();
+    const match = spotifyArtists.find(a => a.name.toLowerCase() === nameLower)
+      || spotifyArtists.find(a => a.name.toLowerCase().includes(nameLower))
+      || spotifyArtists[0];
+    return match?.image || null;
   } catch {
-    const ytmImage = await searchArtistImageYTM(name);
-    if (ytmImage) {
-      return { id: null, name, image: ytmImage, imageBig: ytmImage, imageXl: ytmImage, fans: 0, albums: 0, tracklist: null };
-    }
     return null;
   }
 }
 
-async function searchArtistImageYTM(name) {
+async function searchArtistImageDeezerTrack(name) {
   if (!name) return null;
   try {
-    const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent("ytmsearch:" + name + " artist")}`;
-    const response = await axios.get(url, {
-      headers: { Authorization: LAVALINK_AUTH },
-      timeout: 10000,
-    });
-    const tracks = response.data?.data || [];
-    // Buscar el track cuyo autor coincida exactamente (sin distinguir mayúsculas)
-    const nameLower = name.toLowerCase();
-    const match = tracks.find(t => t.info?.author?.toLowerCase() === nameLower)
-      || tracks.find(t => t.info?.author?.toLowerCase().includes(nameLower))
-      || tracks[0];
-    return match?.info?.artworkUrl || null;
+    const res = await axios.get(`https://api.deezer.com/search/track?q=artist:"${encodeURIComponent(name)}"&limit=3`, { timeout: 5000 });
+    const track = res.data?.data?.[0];
+    return track?.artist?.picture_medium || null;
   } catch {
     return null;
   }
+}
+
+async function searchArtistImageApple(name) {
+  if (!name) return null;
+  try {
+    const res = await axios.get(`https://itunes.apple.com/search?term=${encodeURIComponent(name)}&entity=musicArtist&limit=5`, { timeout: 5000 });
+    const candidates = res.data?.results || [];
+    const nameLower = name.toLowerCase();
+    const match = candidates.find(a => a.artistName?.toLowerCase() === nameLower)
+      || candidates.find(a => a.artistName?.toLowerCase().includes(nameLower))
+      || candidates[0];
+    return match?.artworkUrl100?.replace("100x100bb", "400x400bb") || null;
+  } catch {
+    return null;
+  }
+}
+
+async function searchArtistImageAll(name) {
+  if (!name) return null;
+  const results = await Promise.allSettled([
+    searchArtistImageSpotify(name),
+    searchArtistImageDeezerTrack(name),
+    searchArtistImageApple(name),
+    searchArtistImageYTM(name),
+  ]);
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value) return r.value;
+  }
+  return null;
+}
+
+async function searchArtistImageYTM(name) {
+  if (!name) return null;
+  const nameLower = name.toLowerCase();
+
+  const queries = [
+    `ytmsearch:${name} artist`,
+    `ytmsearch:${name} topic`,
+    `ytmsearch:${name}`,
+  ];
+
+  for (const query of queries) {
+    try {
+      const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(query)}`;
+      const response = await axios.get(url, {
+        headers: { Authorization: LAVALINK_AUTH },
+        timeout: 10000,
+      });
+      const tracks = response.data?.data || [];
+      if (!tracks.length) continue;
+
+      const match = tracks.find(t => t.info?.author?.toLowerCase() === nameLower)
+        || tracks.find(t => t.info?.author?.toLowerCase().includes(nameLower))
+        || tracks[0];
+      if (match?.info?.artworkUrl) return match.info.artworkUrl;
+    } catch {}
+  }
+
+  return null;
 }
 
 async function searchLavalink(source, query, limit = 5) {

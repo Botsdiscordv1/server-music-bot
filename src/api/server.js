@@ -243,6 +243,9 @@ const { getCached, setCached } = (() => {
 const searchCache = new Map();
 const SEARCH_CACHE_TTL = 5 * 60 * 1000;  // 5 min
 const SEARCH_CACHE_MAX = 50;              // máx 50 búsquedas
+const artistInfoCache = new Map();
+const ARTIST_INFO_CACHE_TTL = 60 * 60 * 1000;  // 1 hora
+const ARTIST_INFO_CACHE_MAX = 200;
 function cleanCache(cache, ttl, max) {
   const now = Date.now();
   for (const [key, entry] of cache) {
@@ -254,6 +257,7 @@ function cleanCache(cache, ttl, max) {
   }
 }
 setInterval(() => cleanCache(searchCache, SEARCH_CACHE_TTL, SEARCH_CACHE_MAX), 60_000);
+setInterval(() => cleanCache(artistInfoCache, ARTIST_INFO_CACHE_TTL, ARTIST_INFO_CACHE_MAX), 60_000);
 
 function extractVideoId(input) {
   if (!input) return null;
@@ -1133,11 +1137,32 @@ app.get("/api/artist-image", requireApiKey, async (req, res) => {
   try {
     const name = req.query.name;
     if (!name) return res.status(400).json({ error: "Missing 'name'" });
-    const deezerRes = await axios.get(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=1`);
-    const url = deezerRes.data?.data?.[0]?.picture_medium || null;
-    res.json({ url });
+    const info = await spotify.searchArtistDeezer(name);
+    res.json({ url: info?.image || null });
   } catch (err) {
     res.json({ url: null });
+  }
+});
+
+app.get("/api/artist-bio", requireApiKey, async (req, res) => {
+  try {
+    const name = req.query.name;
+    if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
+
+    const description = await spotify.getArtistDescription(name);
+    if (!description) {
+      return res.status(404).json({ error: "No description found for this artist" });
+    }
+
+    res.json({
+      name,
+      description: description.description,
+      source: description.source,
+      url: description.url,
+    });
+  } catch (err) {
+    console.error("[artist-bio] Error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1146,27 +1171,38 @@ app.get("/api/artist/info", requireApiKey, async (req, res) => {
     const name = req.query.name;
     if (!name) return res.status(400).json({ error: "Missing 'name' parameter" });
 
-    const [deezerInfo, description] = await Promise.all([
+    const cached = artistInfoCache.get(name);
+    if (cached) return res.json(cached);
+
+    const [deezerInfo, description, spotifyArtists] = await Promise.all([
       spotify.searchArtistDeezer(name),
       spotify.getArtistDescription(name),
+      spotify.searchArtistsDirect(name, 3).catch(() => []),
     ]);
 
-    if (!deezerInfo && !description) {
+    if (!deezerInfo && !description && !spotifyArtists.length) {
       return res.status(404).json({ error: "Artist not found" });
     }
 
-    res.json({
-      name: deezerInfo?.name || name,
-      image: deezerInfo?.image || null,
-      imageBig: deezerInfo?.imageBig || null,
-      imageXl: deezerInfo?.imageXl || null,
-      fans: deezerInfo?.fans || 0,
+    const spotifyArtist = spotifyArtists.find(a => a.name.toLowerCase() === name.toLowerCase())
+      || spotifyArtists[0];
+
+    const result = {
+      name: deezerInfo?.name || spotifyArtist?.name || name,
+      image: deezerInfo?.image || spotifyArtist?.image || null,
+      imageBig: deezerInfo?.imageBig || spotifyArtist?.image || null,
+      imageXl: deezerInfo?.imageXl || spotifyArtist?.image || null,
+      fans: deezerInfo?.fans || spotifyArtist?.followers || 0,
       albums: deezerInfo?.albums || 0,
       description: description?.description || null,
       descriptionSource: description?.source || null,
       descriptionUrl: description?.url || null,
       source: "deezer+wikipedia",
-    });
+    };
+
+    artistInfoCache.set(name, { ...result, ts: Date.now() });
+    console.log(`[artist/info] "${name}" → image:${result.image ? result.image.slice(0,60)+"..." : "null"} fans:${result.fans} desc:${result.description ? "✓" : "✗"} src:${result.descriptionSource || "none"}`);
+    res.json(result);
   } catch (err) {
     console.error("[artist/info] Error:", err.message);
     res.status(500).json({ error: err.message });
