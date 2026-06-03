@@ -175,27 +175,27 @@ async function searchArtistDeezer(name) {
         tracklist: a.tracklist || null,
       }));
 
-      // Encontrar candidatos que coincidan y elegir el de más fans
+      // Encontrar mejor candidato por similitud Jaccard (evita falsos positivos)
       const nameLower = cleanName.toLowerCase();
-      const queryWords = nameLower.split(/\s+/).filter(Boolean).filter(w => w.length >= 3);
-      const queryNorm = nameLower.replace(/\s+/g, "");
-      const matched = candidates.filter(a => {
-        const an = a.name.toLowerCase();
-        const artistNorm = an.replace(/\s+/g, "");
-        // 1) exact match
-        if (an === nameLower) return true;
-        // 2) uno contiene al otro (con y sin espacios)
-        if (an.includes(nameLower) || nameLower.includes(an)) return true;
-        if (artistNorm.includes(queryNorm) || queryNorm.includes(artistNorm)) return true;
-        // 3) palabras de 3+ chars como palabra completa (evita "milo" ⊆ "milow")
-        for (const w of queryWords) {
-          const re = new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i");
-          if (re.test(an)) return true;
+      let best = null;
+      let bestScore = 0;
+      for (const a of candidates) {
+        const score = artistNameSimilar(a.name, nameLower);
+        if (score > bestScore || (score === bestScore && a.fans > (best?.fans || 0))) {
+          best = a;
+          bestScore = score;
         }
-        return false;
-      });
-      matched.sort((a, b) => b.fans - a.fans);
-      let artist = matched[0] || null;
+      }
+      // Aceptar si Jaccard >= 0.3, o si >= 0.15 y tiene más fans que cualquier otro sin solapamiento
+      let artist = (best && bestScore >= 0.25) ? best : null;
+      // Si no hay match bueno, probar contains solo si el nombre es muy distintivo (>6 chars)
+      if (!artist && nameLower.length > 6) {
+        for (const a of candidates) {
+          if (a.name.toLowerCase().includes(nameLower) || nameLower.includes(a.name.toLowerCase())) {
+            if (!artist || a.fans > artist.fans) artist = a;
+          }
+        }
+      }
 
       if (artist) {
         if (!artist.image) {
@@ -224,10 +224,16 @@ async function searchArtistImageSpotify(name) {
   try {
     const spotifyArtists = await searchArtistsDirect(name, 5);
     const nameLower = name.toLowerCase();
-    const match = spotifyArtists.find(a => a.name.toLowerCase() === nameLower)
-      || spotifyArtists.find(a => a.name.toLowerCase().includes(nameLower))
-      || spotifyArtists[0];
-    return match?.image || null;
+    let best = null;
+    let bestScore = 0;
+    for (const a of spotifyArtists) {
+      const score = artistNameSimilar(a.name, nameLower);
+      if (score > bestScore || (score === bestScore && a.followers > (best?.followers || 0))) {
+        best = a;
+        bestScore = score;
+      }
+    }
+    return (best && bestScore >= 0.25) ? best.image : null;
   } catch {
     return null;
   }
@@ -250,10 +256,16 @@ async function searchArtistImageApple(name) {
     const res = await axios.get(`https://itunes.apple.com/search?term=${encodeURIComponent(name)}&entity=musicArtist&limit=5`, { timeout: 5000 });
     const candidates = res.data?.results || [];
     const nameLower = name.toLowerCase();
-    const match = candidates.find(a => a.artistName?.toLowerCase() === nameLower)
-      || candidates.find(a => a.artistName?.toLowerCase().includes(nameLower))
-      || candidates[0];
-    return match?.artworkUrl100?.replace("100x100bb", "400x400bb") || null;
+    let best = null;
+    let bestScore = 0;
+    for (const a of candidates) {
+      const score = artistNameSimilar(a.artistName || "", nameLower);
+      if (score > bestScore || (score === bestScore && (a.artistId || 0) > (best?.artistId || 0))) {
+        best = a;
+        bestScore = score;
+      }
+    }
+    return (best && bestScore >= 0.25) ? best.artworkUrl100?.replace("100x100bb", "400x400bb") : null;
   } catch {
     return null;
   }
@@ -293,10 +305,14 @@ async function searchArtistImageYTM(name) {
       const tracks = response.data?.data || [];
       if (!tracks.length) continue;
 
-      const match = tracks.find(t => t.info?.author?.toLowerCase() === nameLower)
-        || tracks.find(t => t.info?.author?.toLowerCase().includes(nameLower))
-        || tracks[0];
-      if (match?.info?.artworkUrl) return match.info.artworkUrl;
+      for (const t of tracks) {
+        const score = artistNameSimilar(t.info?.author || "", nameLower);
+        if (score >= 0.25 && t.info?.artworkUrl) return t.info.artworkUrl;
+      }
+      // fallback: primer track si su author contiene al nombre buscado
+      if (tracks[0]?.info?.artworkUrl && tracks[0].info.author?.toLowerCase().includes(nameLower)) {
+        return tracks[0].info.artworkUrl;
+      }
     } catch {}
   }
 
@@ -464,12 +480,38 @@ function cleanArtistName(name) {
   return name.split(/[,;&/]|feat\.|ft\.|Feat\.|Ft\./)[0].replace(/\(.*?\)/g, "").replace(/\[.*?\]/g, "").trim();
 }
 
+// Jaccard similarity entre conjuntos de palabras (sin contar palabras ≤2 chars)
+function artistNameSimilar(a, b) {
+  const wordsA = a.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const wordsB = b.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (!wordsA.length || !wordsB.length) return a.toLowerCase() === b.toLowerCase() ? 1 : 0;
+  const setA = new Set(wordsA);
+  const setB = new Set(wordsB);
+  let intersection = 0;
+  for (const w of setA) if (setB.has(w)) intersection++;
+  const union = new Set([...setA, ...setB]).size;
+  return intersection / union;
+}
+
 async function getArtistImage(name) {
   const cleanName = cleanArtistName(name);
   if (!cleanName) return null;
   try {
-    const deezerRes = await axios.get(`https://api.deezer.com/search/artist?q=${encodeURIComponent(cleanName)}&limit=1`, { timeout: 5000 });
-    return deezerRes.data?.data?.[0]?.picture_medium || null;
+    const res = await axios.get(`https://api.deezer.com/search/artist?q=${encodeURIComponent(cleanName)}&limit=10`, { timeout: 5000 });
+    const candidates = res.data?.data || [];
+    const nameLower = cleanName.toLowerCase();
+    let best = null;
+    let bestScore = 0;
+    for (const a of candidates) {
+      const score = artistNameSimilar(a.name, nameLower);
+      if (score > bestScore || (score === bestScore && (a.nb_fan || 0) > (best?.nb_fan || 0))) {
+        best = a;
+        bestScore = score;
+      }
+    }
+    if (best && bestScore >= 0.3) return best.picture_medium || null;
+    if (best && bestScore > 0) return best.picture_medium || null; // al menos 1 palabra coincide
+    return null;
   } catch {
     return null;
   }

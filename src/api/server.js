@@ -706,9 +706,18 @@ async function enrichExplicitWithDeezerISRC(tracks) {
   await Promise.allSettled(lookups);
 }
 
+function enrichArtistNameSimilar(a, b) {
+  const wa = (a || "").toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const wb = (b || "").toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (!wa.length || !wb.length) return (a || "").toLowerCase() === (b || "").toLowerCase() ? 1 : 0;
+  const sa = new Set(wa), sb = new Set(wb);
+  let inter = 0;
+  for (const w of sa) if (sb.has(w)) inter++;
+  return inter / new Set([...sa, ...sb]).size;
+}
+
 async function enrichArtworkWithDeezer(tracks) {
   const enriched = [...tracks];
-  // Limitar enriquecimiento a los primeros 6 resultados para ahorrar RAM y peticiones HTTP
   const limit = Math.min(enriched.length, 6);
   for (let i = 0; i < limit; i++) {
     const track = enriched[i];
@@ -716,14 +725,25 @@ async function enrichArtworkWithDeezer(tracks) {
     if (!needsArtwork && track.explicit !== undefined) continue;
     try {
       const q = encodeURIComponent(`${track.artist} ${track.title}`);
-      const res = await axios.get(`https://api.deezer.com/search/track?q=${q}&limit=1`, { timeout: 3000 });
-      const data = res.data?.data?.[0];
-      if (data) {
-        if (data.album?.cover_medium) {
-          track.artworkUrl = data.album.cover_medium;
-          track.thumbnail = data.album.cover_medium;
+      const res = await axios.get(`https://api.deezer.com/search/track?q=${q}&limit=3`, { timeout: 3000 });
+      const data = res.data?.data || [];
+      // Validar que el artista coincida antes de aceptar artwork
+      let match = null;
+      const trackArtist = track.artist || "";
+      for (const d of data) {
+        const deezerArtist = d.artist?.name || "";
+        if (enrichArtistNameSimilar(deezerArtist, trackArtist) >= 0.25) {
+          match = d;
+          break;
         }
-        if (data.explicit_lyrics !== undefined) track.explicit = data.explicit_lyrics;
+      }
+      if (!match) match = data[0]; // último recurso
+      if (match) {
+        if (match.album?.cover_medium) {
+          track.artworkUrl = match.album.cover_medium;
+          track.thumbnail = match.album.cover_medium;
+        }
+        if (match.explicit_lyrics !== undefined) track.explicit = match.explicit_lyrics;
       }
     } catch (e) {}
   }
