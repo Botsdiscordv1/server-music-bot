@@ -989,8 +989,9 @@ app.get("/api/lyrics", requireApiKey, async (req, res) => {
 app.get("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
     const userId = req.userId || req.params.userId;
-    const source = req.provider || "android";
-    const songs = await db.getLikedSongs(userId, parseInt(req.query.limit) || 0, source);
+    const connSource = req.provider || "android";
+    const contentType = req.query.type === "video" ? "VIDEO" : req.query.type === "audio" ? "AUDIO" : null;
+    const songs = await db.getLikedSongs(userId, parseInt(req.query.limit) || 0, connSource, contentType);
     res.json({ count: songs.length, songs });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1000,14 +1001,36 @@ app.get("/api/likes/:userId", requireApiKey, async (req, res) => {
 app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
     const userId = req.userId || req.params.userId;
-    const source = req.provider || "android";
-    const { trackTitle, trackAuthor, trackUrl, trackDuration, artworkUrl, isrc, explicit, genres } = req.body;
+    const connSource = req.provider || "android";
+    const { trackTitle, trackAuthor, trackUrl, trackDuration, artworkUrl, isrc, explicit, genres, source } = req.body;
     const mockTrack = {
-      info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "", explicit: explicit === true, genres: genres || [] },
+      info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "", explicit: explicit === true, genres: genres || [], sourceName: source || "ytmsearch" },
       pluginInfo: { isrc: isrc || null }
     };
-    const added = await db.addLikedSong(userId, mockTrack, source);
+    const added = await db.addLikedSong(userId, mockTrack, connSource);
     res.json({ added });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/likes/audio/:userId", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId || req.params.userId;
+    const connSource = req.provider || "android";
+    const songs = await db.getLikedSongs(userId, parseInt(req.query.limit) || 0, connSource, "AUDIO");
+    res.json({ count: songs.length, songs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/likes/video/:userId", requireApiKey, async (req, res) => {
+  try {
+    const userId = req.userId || req.params.userId;
+    const connSource = req.provider || "android";
+    const songs = await db.getLikedSongs(userId, parseInt(req.query.limit) || 0, connSource, "VIDEO");
+    res.json({ count: songs.length, songs });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

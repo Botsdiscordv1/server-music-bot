@@ -44,6 +44,8 @@ const likedSongSchema = new mongoose.Schema({
   isrc: String,
   explicit: { type: Boolean, default: false },
   genres: { type: [String], default: [] },
+  source: { type: String, default: "ytmsearch" },
+  contentType: { type: String, enum: ["AUDIO", "VIDEO"], default: "AUDIO" },
   likedAt: { type: Date, default: Date.now },
 });
 likedSongSchema.index({ userId: 1, trackUrl: 1 });
@@ -308,6 +310,8 @@ async function addLikedSong(userId, track, source = "android") {
     const isrc = extractIsrc(track);
     const explicit = track.info.explicit === true || track.pluginInfo?.explicit === true;
     const genres = track.info.genres || track.pluginInfo?.genres || [];
+    const sourceName = track.info.sourceName || "ytmsearch";
+    const contentType = sourceName === "youtube_video" ? "VIDEO" : "AUDIO";
     await LikedSong.create({
       userId,
       trackTitle: track.info.title,
@@ -318,6 +322,8 @@ async function addLikedSong(userId, track, source = "android") {
       isrc: isrc || undefined,
       explicit: explicit || undefined,
       genres: genres.length ? genres : undefined,
+      source: sourceName,
+      contentType,
     });
     return true;
   } catch { return false; }
@@ -362,10 +368,12 @@ async function removeAllLikedSongs(userId, source = "android") {
   return result.deletedCount;
 }
 
-async function getLikedSongs(userId, limit = 0, source = "android") {
+async function getLikedSongs(userId, limit = 0, source = "android", contentType = null) {
   const { LikedSong } = getModels(source);
   await whenReady(() => {});
-  let query = LikedSong.find({ userId }).sort({ likedAt: -1 });
+  let filter = { userId };
+  if (contentType) filter.contentType = contentType;
+  let query = LikedSong.find(filter).sort({ likedAt: -1 });
   if (limit > 0) query = query.limit(limit);
   const docs = await query.lean();
   return docs.map(doc => ({
@@ -379,6 +387,8 @@ async function getLikedSongs(userId, limit = 0, source = "android") {
     isrc: doc.isrc,
     explicit: doc.explicit || false,
     genres: doc.genres || [],
+    source: doc.source || "ytmsearch",
+    content_type: doc.contentType || "AUDIO",
     liked_at: doc.likedAt,
   }));
 }
@@ -577,6 +587,8 @@ async function copyLikedSongs(fromUserId, toUserId, source = "android") {
       isrc: song.isrc,
       explicit: song.explicit || undefined,
       genres: song.genres || undefined,
+      source: song.source || "ytmsearch",
+      contentType: song.contentType || "AUDIO",
     }));
     await LikedSong.insertMany(docs, { ordered: false });
   }
@@ -776,6 +788,8 @@ async function syncUserData(userId, localData, source = "android") {
           isrc: song.isrc || undefined,
           explicit: song.explicit || false,
           genres: song.genres || [],
+          source: song.source || "ytmsearch",
+          contentType: song.contentType || "AUDIO",
         });
         added++;
       } catch {}
@@ -791,6 +805,8 @@ async function syncUserData(userId, localData, source = "android") {
       isrc: s.isrc,
       explicit: s.explicit || false,
       genres: s.genres || [],
+      source: s.source || "ytmsearch",
+      content_type: s.contentType || "AUDIO",
       liked_at: s.likedAt,
     }));
     result.likedSongsAdded = added;
