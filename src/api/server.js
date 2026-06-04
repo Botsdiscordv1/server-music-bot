@@ -16,6 +16,7 @@ const {
 } = db;
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
+const ytmusic = require("../services/ytmusic");
 
 const axios = require("axios");
 const play = require("play-dl");
@@ -652,9 +653,9 @@ app.get("/api/search", requireApiKey, async (req, res) => {
           }
         }
       }
-      // 2) Enriquecer portadas con Deezer en background
+      // 2) Enriquecer metadatos con YouTube Music en background
       try {
-        const enriched = await enrichArtworkWithDeezer(tracks);
+        const enriched = await ytmusic.enrichTracks(tracks);
         if (enriched.length) {
           result.tracks = enriched;
           searchCache.set(cacheKey, { data: result, ts: Date.now() });
@@ -688,7 +689,7 @@ async function searchLavalink(source, query) {
     album: t.info?.albumName || t.pluginInfo?.albumName || null,
     albumUrl: t.pluginInfo?.albumUrl || null,
     isrc: t.info?.isrc || t.pluginInfo?.isrc || null,
-    explicit: false,
+    explicit: t.info?.explicit === true || t.pluginInfo?.explicit === true,
   }));
   await enrichExplicitWithDeezerISRC(tracks);
   return tracks;

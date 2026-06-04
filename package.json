@@ -22,7 +22,8 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-local": "^1.0.0",
     "play-dl": "^1.9.7",
-    "sql.js": "^1.11.0"
+    "sql.js": "^1.11.0",
+    "youtube-music-api": "^1.0.6"
   },
   "engines": {
     "node": "20.x"
