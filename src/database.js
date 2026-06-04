@@ -52,6 +52,26 @@ likedSongSchema.index({ userId: 1, trackUrl: 1 });
 likedSongSchema.index({ userId: 1, isrc: 1 });
 likedSongSchema.index({ userId: 1, trackAuthor: 1 });
 
+const metadataPoolSchema = new mongoose.Schema({
+  fingerprint: { type: String, required: true },
+  isrc: String,
+  trackTitle: String,
+  trackAuthor: String,
+  albumName: String,
+  artworkUrl: String,
+  thumbnailUrl: String,
+  ytVideoId: String,
+  explicit: Boolean,
+  genres: [String],
+  featuredArtists: [String],
+  confidence: { type: Number, default: 0 },
+  lastVerified: { type: Date, default: Date.now },
+  version: { type: Number, default: 1 },
+}, { timestamps: true });
+metadataPoolSchema.index({ fingerprint: 1 }, { unique: true });
+metadataPoolSchema.index({ isrc: 1 });
+metadataPoolSchema.index({ updatedAt: -1 });
+
 const likedAlbumSchema = new mongoose.Schema({
   userId: { type: String, required: true },
   albumId: { type: String, required: true },
@@ -104,6 +124,7 @@ const TrackPlay = mongoose.model("TrackPlay", trackPlaySchema);
 const DislikedSong = mongoose.model("DislikedSong", dislikedSongSchema);
 const LikedAlbum = mongoose.model("LikedAlbum", likedAlbumSchema);
 const FollowedArtist = mongoose.model("FollowedArtist", followedArtistSchema);
+const MetadataPool = mongoose.model("MetadataPool", metadataPoolSchema);
 
 // ── Discord connection (separate DB) ──────────────────────────────────
 const discordUri = process.env.DISCORD_MONGODB_URI;
@@ -118,6 +139,7 @@ let DiscordTrackPlay = null;
 let DiscordDislikedSong = null;
 let DiscordLikedAlbum = null;
 let DiscordFollowedArtist = null;
+let DiscordMetadataPool = null;
 
 if (discordConn) {
   DiscordUser = discordConn.model("User", userSchema);
@@ -129,6 +151,7 @@ if (discordConn) {
   DiscordDislikedSong = discordConn.model("DislikedSong", dislikedSongSchema);
   DiscordLikedAlbum = discordConn.model("LikedAlbum", likedAlbumSchema);
   DiscordFollowedArtist = discordConn.model("FollowedArtist", followedArtistSchema);
+  DiscordMetadataPool = discordConn.model("MetadataPool", metadataPoolSchema);
 }
 
 function getModels(source) {
@@ -142,9 +165,10 @@ function getModels(source) {
       DislikedSong: DiscordDislikedSong,
       LikedAlbum: DiscordLikedAlbum,
       FollowedArtist: DiscordFollowedArtist,
+      MetadataPool: DiscordMetadataPool,
     };
   }
-  return { UserStats, Playlist, History, LikedSong, TrackPlay, DislikedSong, LikedAlbum, FollowedArtist };
+  return { UserStats, Playlist, History, LikedSong, TrackPlay, DislikedSong, LikedAlbum, FollowedArtist, MetadataPool };
 }
 
 // ── Init DB ─────────────────────────────────────────────────────────────
@@ -667,6 +691,69 @@ async function removeDislikedSongById(userId, id, source = "android") {
 }
 
 // ── Migration helpers ──────────────────────────────────────────────────
+// ── Metadata Pool CRUD ──────────────────────────────────────────────────────
+
+function createFingerprint(artist, title) {
+  const a = (artist || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+  const t = (title || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+  return `${a} - ${t}`.replace(/\s+/g, " ");
+}
+
+async function upsertMetadataPool(entry, source = "android") {
+  const { MetadataPool } = getModels(source);
+  await whenReady(() => {});
+  const filter = entry.fingerprint ? { fingerprint: entry.fingerprint } : {};
+  if (!entry.fingerprint) return null;
+  const existing = await MetadataPool.findOne(filter).lean();
+  if (existing) {
+    const merged = { ...existing, ...entry, version: existing.version + 1, lastVerified: new Date() };
+    await MetadataPool.updateOne(filter, { $set: merged });
+    return { ...merged, _id: existing._id };
+  }
+  const doc = await MetadataPool.create({ ...entry, version: 1, lastVerified: new Date() });
+  return doc.toObject();
+}
+
+async function getMetadataPool(fingerprint, source = "android") {
+  const { MetadataPool } = getModels(source);
+  await whenReady(() => {});
+  if (!fingerprint) return null;
+  return MetadataPool.findOne({ fingerprint }).lean();
+}
+
+async function getMetadataPoolByISRC(isrc, source = "android") {
+  const { MetadataPool } = getModels(source);
+  await whenReady(() => {});
+  if (!isrc) return null;
+  return MetadataPool.findOne({ isrc }).lean();
+}
+
+async function queryMetadataPool(filter = {}, limit = 50, source = "android") {
+  const { MetadataPool } = getModels(source);
+  await whenReady(() => {});
+  return MetadataPool.find(filter).sort({ updatedAt: -1 }).limit(limit).lean();
+}
+
+async function getMetadataPoolChangesSince(since, source = "android") {
+  const { MetadataPool } = getModels(source);
+  await whenReady(() => {});
+  return MetadataPool.find({ updatedAt: { $gte: new Date(since) } }).sort({ updatedAt: -1 }).lean();
+}
+
+async function updateLikedSongMetadata(userId, trackUrl, updates, source = "android") {
+  const { LikedSong } = getModels(source);
+  await whenReady(() => {});
+  const setFields = {};
+  if (updates.trackTitle) setFields.trackTitle = updates.trackTitle;
+  if (updates.trackAuthor) setFields.trackAuthor = updates.trackAuthor;
+  if (updates.artworkUrl) setFields.artworkUrl = updates.artworkUrl;
+  if (updates.explicit !== undefined) setFields.explicit = updates.explicit;
+  if (updates.genres) setFields.genres = updates.genres;
+  if (Object.keys(setFields).length === 0) return false;
+  await LikedSong.updateOne({ userId, trackUrl }, { $set: setFields });
+  return true;
+}
+
 const BAD_URI_REGEX = /^(https?:\/\/(www\.)?(deezer\.com|open\.spotify\.com)|spotify:(track|album|playlist):)/i;
 
 async function findLikedSongByUrl(url, source = "android") {
@@ -1067,6 +1154,13 @@ module.exports = {
   updateLikedSongUrl,
   getAllLikedSongsWithBadUrls,
   BAD_URI_REGEX,
+  createFingerprint,
+  upsertMetadataPool,
+  getMetadataPool,
+  getMetadataPoolByISRC,
+  queryMetadataPool,
+  getMetadataPoolChangesSince,
+  updateLikedSongMetadata,
   DiscordUser,
   addRecentPlayback,
   getRecentPlayback,

@@ -17,6 +17,7 @@ const {
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
 const ytmusic = require("../services/ytmusic");
+const metadataEnricher = require("../services/metadataEnricher");
 
 const axios = require("axios");
 const play = require("play-dl");
@@ -1020,6 +1021,19 @@ app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
     };
     const added = await db.addLikedSong(userId, mockTrack, connSource);
     res.json({ added });
+
+    // Auto-enrich en background
+    setImmediate(async () => {
+      try {
+        const enriched = await metadataEnricher.enrichSingleTrack(trackAuthor, trackTitle, isrc);
+        if (enriched && enriched.confidence >= 3) {
+          await db.updateLikedSongMetadata(userId, trackUrl, enriched, connSource);
+          console.log(`[MetadataPool] Auto-enriched liked track: ${trackTitle} - ${trackAuthor}`);
+        }
+      } catch (e) {
+        console.warn(`[MetadataPool] Auto-enrich failed for ${trackTitle}: ${e.message}`);
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1259,6 +1273,96 @@ app.get("/api/artist/info", requireApiKey, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[artist/info] Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Metadata Pool (Enriquecimiento Híbrido) ──────────────────────────
+
+app.post("/api/metadata/enrich", requireApiKey, async (req, res) => {
+  try {
+    const { tracks } = req.body;
+    if (!tracks || !Array.isArray(tracks) || tracks.length === 0) {
+      return res.status(400).json({ error: "Missing or empty 'tracks' array" });
+    }
+    const batchSize = Math.min(tracks.length, 10);
+    const enriched = await metadataEnricher.enrichTracks(tracks.slice(0, batchSize));
+    res.json({ enriched: enriched.length, tracks: enriched });
+  } catch (err) {
+    console.error("[Metadata/Enrich] Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/metadata/pool", requireApiKey, async (req, res) => {
+  try {
+    const { q, limit } = req.query;
+    const connSource = req.provider || "android";
+    let results;
+    if (q) {
+      const fp = metadataEnricher.createFingerprint(q, q);
+      const byFp = await db.getMetadataPool(fp, connSource);
+      if (byFp) {
+        results = [byFp];
+      } else {
+        const filter = {
+          $or: [
+            { trackTitle: { $regex: q, $options: "i" } },
+            { trackAuthor: { $regex: q, $options: "i" } },
+          ]
+        };
+        results = await db.queryMetadataPool(filter, parseInt(limit) || 50, connSource);
+      }
+    } else {
+      results = await db.queryMetadataPool({}, parseInt(limit) || 50, connSource);
+    }
+    res.json({ count: results.length, entries: results });
+  } catch (err) {
+    console.error("[Metadata/Pool] Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/metadata/sync", requireApiKey, async (req, res) => {
+  try {
+    const { since } = req.query;
+    const connSource = req.provider || "android";
+    if (!since) return res.status(400).json({ error: "Missing 'since' query param (ISO timestamp)" });
+    const entries = await db.getMetadataPoolChangesSince(since, connSource);
+    res.json({ count: entries.length, entries });
+  } catch (err) {
+    console.error("[Metadata/Sync] Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/enrich-all-likes", requireApiKey, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const connSource = req.provider || "android";
+    if (!userId) return res.status(400).json({ error: "userId required" });
+    const allLikes = await db.getLikedSongs(userId, 0, connSource);
+    res.json({ queued: allLikes.length, message: "Enriching in background" });
+
+    setImmediate(async () => {
+      let enriched = 0;
+      for (const song of allLikes) {
+        try {
+          const result = await metadataEnricher.enrichSingleTrack(
+            song.track_author, song.track_title, song.isrc
+          );
+          if (result && result.confidence >= 3) {
+            await db.updateLikedSongMetadata(userId, song.track_url, result, connSource);
+            enriched++;
+          }
+        } catch (e) {
+          console.warn(`[Metadata/Admin] Failed: ${song.track_title} - ${e.message}`);
+        }
+      }
+      console.log(`[Metadata/Admin] Enriched ${enriched}/${allLikes.length} liked songs for user ${userId}`);
+    });
+  } catch (err) {
+    console.error("[Metadata/Admin] Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
