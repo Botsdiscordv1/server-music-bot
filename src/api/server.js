@@ -692,6 +692,16 @@ async function searchLavalink(source, query) {
     explicit: t.info?.explicit === true || t.pluginInfo?.explicit === true,
   }));
   await enrichExplicitWithDeezerISRC(tracks);
+  try {
+    const enriched = await ytmusic.enrichTracks(tracks);
+    if (enriched) {
+      const enrichedCount = enriched.filter(t => t.ytVideoId).length;
+      console.log(`[YTMusic] Enriched ${enrichedCount}/${enriched.length} tracks for "${query}"`);
+      return enriched;
+    }
+  } catch (e) {
+    console.warn(`[YTMusic] Enrichment error for "${query}": ${e.message}`);
+  }
   return tracks;
 }
 

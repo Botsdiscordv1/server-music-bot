@@ -372,7 +372,11 @@ async function getLikedSongs(userId, limit = 0, source = "android", contentType 
   const { LikedSong } = getModels(source);
   await whenReady(() => {});
   let filter = { userId };
-  if (contentType) filter.contentType = contentType;
+  if (contentType === "AUDIO") {
+    filter.$or = [{ contentType: "AUDIO" }, { contentType: { $exists: false } }];
+  } else if (contentType === "VIDEO") {
+    filter.contentType = "VIDEO";
+  }
   let query = LikedSong.find(filter).sort({ likedAt: -1 });
   if (limit > 0) query = query.limit(limit);
   const docs = await query.lean();

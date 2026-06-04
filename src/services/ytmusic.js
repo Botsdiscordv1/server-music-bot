@@ -40,7 +40,7 @@ async function searchTrack(artist, title) {
       .map(t => ({
         videoId: t.videoId,
         title: t.name,
-        artists: extractArtists(t),
+        authors: extractArtists(t),
         artist: extractArtists(t)[0] || "",
         album: t.album?.name || null,
         duration: t.duration,
@@ -68,7 +68,7 @@ async function enrichTracks(tracks) {
         const best = results[0];
         enriched[i].title = best.title;
         enriched[i].artist = best.artist;
-        enriched[i].artists = best.artists;
+        enriched[i].authors = best.authors;
         if (best.thumbnail) {
           enriched[i].artworkUrl = best.thumbnail;
           enriched[i].thumbnail = best.thumbnail;
