@@ -153,7 +153,12 @@ async function enrichSingleTrack(artist, title, isrc) {
 
   const sources = [];
 
-  const lavalinkTracks = await searchLavalink("ytmsearch", `${artist} ${title}`);
+  let lavalinkTracks = [];
+  try {
+    lavalinkTracks = await searchLavalink("ytmsearch", `${artist} ${title}`);
+  } catch (e) {
+    lavalinkTracks = [];
+  }
   if (lavalinkTracks.length > 0) {
     const t = lavalinkTracks[0];
     await enrichExplicitWithDeezerISRC([t]);

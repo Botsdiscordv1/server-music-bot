@@ -486,9 +486,13 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     if (source === "ytmsearch") {
       tracks = await innertube.searchQuery(q);
     }
-    // Fallback a Lavalink si InnerTube no dio resultado o no es ytmsearch
+    // Fallback a Lavalink (catch silencioso si está caído)
     if (!tracks.length) {
-      tracks = await searchLavalink(source, q);
+      try {
+        tracks = await searchLavalink(source, q);
+      } catch (e) {
+        tracks = [];
+      }
     }
 
     if (!tracks.length) return res.json({ query: q, source, tracks: [] });
@@ -499,14 +503,6 @@ app.get("/api/search", requireApiKey, async (req, res) => {
 
     // Background: enriquecer con Lavalink (encoded, isrc, explicit) + pre-resolver streams
     setImmediate(async () => {
-      try {
-        const lavalinkTracks = await searchLavalink(source, q);
-        if (lavalinkTracks.length) {
-          result.tracks = lavalinkTracks;
-          searchCache.set(cacheKey, { data: result, ts: Date.now() });
-        }
-      } catch (e) {}
-      // Pre-resolver streams
       if (!IS_RENDER) {
         const toResolve = result.tracks.slice(0, 3);
         for (const track of toResolve) {
