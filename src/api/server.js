@@ -328,7 +328,18 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   }
 
-  // D. SoundCloud fallback
+  // D. Cobalt fallback (rápido, funciona desde datacenter IPs)
+  try {
+    const streamUrl = await resolveViaCobalt(videoId, isVideo);
+    if (streamUrl) {
+      setCached(cacheKey, streamUrl);
+      return streamUrl;
+    }
+  } catch (e) {
+    console.warn(`[stream] Cobalt fallback failed for ${videoId}: ${e.message}`);
+  }
+
+  // E. SoundCloud fallback
   try {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
     let videoTitle = "";
@@ -362,6 +373,43 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   }
 
   failedVideoIds.set(cacheKey, Date.now());
+  return null;
+}
+
+async function resolveViaCobalt(videoId, isVideo = false) {
+  const instances = [
+    "https://fox.kittycat.boo",
+    "https://cobaltapi.cjs.nz",
+    "https://dog.kittycat.boo",
+    "https://api.cobalt.liubquanti.click",
+  ];
+  for (const instance of instances) {
+    try {
+      console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
+      const payload = {
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        downloadMode: isVideo ? "progressive" : "audio",
+        audioFormat: "mp3",
+        audioBitrate: "128",
+        filenameStyle: "classic",
+      };
+      if (isVideo) payload.videoQuality = "720";
+      const res = await axios.post(instance, payload, {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        timeout: 10000,
+      });
+      if (res.data?.url) {
+        console.log(`[stream] Cobalt success for ${videoId} (${instance})`);
+        return res.data.url;
+      }
+    } catch (err) {
+      console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
+    }
+  }
   return null;
 }
 
