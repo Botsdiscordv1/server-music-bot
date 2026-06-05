@@ -200,12 +200,12 @@ async function extractVideoIdFromLavalink(input) {
 }
 
 const failedVideoIds = new Map();
+const blockedVideoIds = new Set();
 setInterval(() => {
   for (const [id, ts] of failedVideoIds) {
-    // Reducido de 1 hora a 5 minutos: errores transitorios (Cobalt, red) no bloquean indefinidamente
     if (Date.now() - ts > 5 * 60_000) failedVideoIds.delete(id);
   }
-}, 60_000); // limpiar cada 60 segundos
+}, 60_000);
 
 let streamQueuePromise = Promise.resolve();
 
@@ -237,6 +237,9 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
 
   if (forceRefresh) {
     failedVideoIds.delete(cacheKey);
+    blockedVideoIds.delete(cacheKey);
+  } else if (blockedVideoIds.has(cacheKey)) {
+    return { blocked: true, videoId };
   } else if (failedVideoIds.has(cacheKey)) {
     return null;
   }
@@ -330,7 +333,13 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
       return streamUrl;
     }
   } catch (e) {
-    console.warn(`[stream] yt-dlp failed for ${videoId}: ${e.message}`);
+    const msg = e.message || "";
+    if (msg.includes("Video unavailable") || msg.includes("This video is not available")) {
+      console.warn(`[stream] Video blocked/unavailable: ${videoId}`);
+      blockedVideoIds.add(cacheKey);
+      return { blocked: true, videoId };
+    }
+    console.warn(`[stream] yt-dlp failed for ${videoId}: ${msg}`);
   }
 
   // B. play-dl (solo si no es Render, audio)
@@ -775,7 +784,7 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
           const tracks = await searchLavalink(searchSource, query);
           if (tracks.length) {
             const streamUrl = await resolveStreamUrl(tracks[0].uri, req, forceRefresh, isVideo);
-            if (streamUrl) {
+            if (typeof streamUrl === "string") {
               return res.json({ url: getFinalStreamUrl(streamUrl), resolvedFrom: isVideo ? "yt" : "ytm" });
             }
           }
@@ -787,8 +796,11 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     }
 
     const streamUrl = await resolveStreamUrl(id, req, forceRefresh, isVideo);
-    if (streamUrl) {
+    if (typeof streamUrl === "string") {
       return res.json({ url: getFinalStreamUrl(streamUrl) });
+    }
+    if (streamUrl?.blocked) {
+      return res.status(403).json({ error: "Video blocked in this region", blocked: true, videoId: id });
     }
 
     res.status(404).json({ error: "No stream found after fallback" });
