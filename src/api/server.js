@@ -303,11 +303,39 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
   });
 }
 
+async function resolveViaPiped(videoId, isVideo = false) {
+  const instances = [
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.telexi.me",
+  ];
+  for (const instance of instances) {
+    try {
+      console.log(`[stream] Trying Piped instance: ${instance} for video ${videoId}`);
+      const axiosOpts = { timeout: 5000 };
+      if (proxyAgent) { axiosOpts.httpsAgent = proxyAgent; axiosOpts.proxy = false; }
+      const res = await axios.get(`${instance}/streams/${videoId}`, axiosOpts);
+      if (!res.data) continue;
+      if (isVideo) {
+        const vStreams = res.data.videoStreams || [];
+        vStreams.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+        if (vStreams[0]?.url) return vStreams[0].url;
+      } else {
+        const aStreams = res.data.audioStreams || [];
+        aStreams.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
+        if (aStreams[0]?.url) return aStreams[0].url;
+      }
+    } catch (err) {
+      console.warn(`[stream] Piped instance ${instance} failed: ${err.message}`);
+    }
+  }
+  return null;
+}
+
 async function resolveViaInvidious(videoId, isVideo = false) {
   const instances = [
-    "https://iv.melmac.space",
-    "https://invidious.snopyta.org",
-    "https://yewtu.be"
+    "https://inv.thepixora.com",
+    "https://invidious.f5.si",
+    "https://invidious.nerdvpn.de",
   ];
 
   for (const instance of instances) {
@@ -416,6 +444,17 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   } catch (e) {
     console.warn(`[stream] Invidious fallback failed for ${videoId}: ${e.message}`);
+  }
+
+  // E. Piped fallback
+  try {
+    const streamUrl = await resolveViaPiped(videoId, isVideo);
+    if (streamUrl) {
+      setCached(cacheKey, streamUrl);
+      return streamUrl;
+    }
+  } catch (e) {
+    console.warn(`[stream] Piped fallback failed for ${videoId}: ${e.message}`);
   }
 
   failedVideoIds.set(cacheKey, Date.now());
