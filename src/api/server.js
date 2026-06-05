@@ -25,11 +25,25 @@ const play = require("play-dl");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 
 const PROXY_URL = process.env.PROXY_URL || "";
 const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
 
+// Cookies de YouTube para yt-dlp (base64 del cookies.txt exportado del navegador)
+let YT_COOKIES_PATH = "";
+const YT_COOKIES_B64 = process.env.YT_COOKIES || "";
+if (YT_COOKIES_B64) {
+  try {
+    const tmpFile = path.join(os.tmpdir(), "yt-cookies.txt");
+    fs.writeFileSync(tmpFile, Buffer.from(YT_COOKIES_B64, "base64").toString("utf-8"));
+    YT_COOKIES_PATH = tmpFile;
+    console.log("[SERVER] YouTube cookies loaded from YT_COOKIES env var");
+  } catch (err) {
+    console.warn(`[SERVER] Failed to write YouTube cookies: ${err.message}`);
+  }
+}
 
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
@@ -64,6 +78,7 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
       "--max-sleep", "3",
     ];
     if (PROXY_URL) { args.push("--proxy", PROXY_URL); }
+    if (YT_COOKIES_PATH) { args.push("--cookies", YT_COOKIES_PATH); }
     const executionTimeout = IS_RENDER ? 12000 : 45000;
     const proc = spawn(YTDLP_PATH, args, { timeout: executionTimeout });
     let stdout = "", stderr = "";
