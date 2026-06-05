@@ -1,7 +1,14 @@
 # Backend 2.0 — Cambios para el Cliente Android
 
 ## InnerTube cliente propio (reemplaza youtube-music-api)
-El backend ahora implementa su propio cliente InnerTube en Node.js, eliminando la dependencia de la librería `youtube-music-api` (que daba 403 constante).
+El backend ahora implementa su propio cliente InnerTube en Node.js, eliminando la dependencia de la librería `youtube-music-api` (que daba 403 constante) y el archivo `ytmusic.js`.
+
+**Qué cambió:**
+- **Búsqueda**: Usa el mismo endpoint InnerTube que YouTube Music web. Resultados idénticos a la app oficial, 20 items por query.
+- **Streaming**: Resuelve streams directamente desde InnerTube `/player` endpoint. Obtiene URLs directas de los CDN de YouTube sin necesidad de cookies, priorizando itag 251 (Opus 160kbps).
+- **Sin 403**: Al usar WEB_REMUX client (mismo que music.youtube.com), YouTube no bloquea las peticiones.
+- **Config se refresca** cada 30 minutos en background con cookies de sesión.
+- **Rate limiter**: 10 búsquedas/segundo, 3 player requests/segundo. Cache de player por 6 horas.
 
 **Qué cambió:**
 - **Búsqueda**: Usa el mismo endpoint InnerTube que YouTube Music web. Resultados idénticos a la app oficial.
