@@ -3,85 +3,55 @@
 ## v2.0 — InnerTube Cliente Propio
 
 ### Cambio grande
-El backend reemplazó la librería `youtube-music-api` (daba 403 constante) por un **InnerTube cliente propio** en Node.js, implementado desde cero. El archivo `ytmusic.js` fue eliminado.
+El backend reemplazó la librería `youtube-music-api` por un **InnerTube cliente propio**. `ytmusic.js` eliminado.
 
-### Impacto en el cliente
-La API responde igual en formato, pero con MUCHA más velocidad y confiabilidad.
+### Latencia al reproducir (~5s → ~1s posible)
 
----
-
-### Búsqueda (<1s, sin 403)
-- Las llamadas a `GET /api/search?source=ytmsearch` ahora usan el mismo endpoint InnerTube que YouTube Music web.
-- Resultados idénticos a la app oficial, 20 items por query.
-- **Ya no hay 403**. Si por algún motivo InnerTube falla, cae automáticamente a Lavalink (~3s).
-- Rate limit: 10 búsquedas/segundo (suficiente para autocomplete).
-
-### Streaming (CDN directo, sin cookies)
-- `GET /api/stream` ahora intenta primero InnerTube `/player` (~1s).
-- Obtiene URLs directas del CDN de YouTube (`googlevideo.com`) sin cookies.
-- Prioriza itag 251 (Opus 160kbps) — mejor calidad, menor consumo.
-- Cache de 6h por video (no se re-resuelve cada vez).
-
-**Flujo actual:**
-1. InnerTube `/player` → ~1s ✅
-2. yt-dlp → ~3s (fallback)
-3. play-dl → (si no está en Render)
-4. Invidious `iv.melmac.space` → (fallback final)
-5. Tu `InnertubeClient` local → (último recurso)
-
-### Streaming directo (opcional, más rápido)
-Nuevo parámetro `?direct=true` en `/api/stream` para saltarse el proxy y recibir la URL del CDN directa:
-
+**Flujo actual (lento):**
 ```
-GET /api/stream?id=xxx&direct=true
-→ { "url": "https://rr2...googlevideo.com/..." }
+1. /api/stream?refresh=true   (descarta caché, InnerTube ~1s)
+2. /api/lyrics                 (espera ~1s)
+3. /api/artist/info            (espera ~1s)
+4. /api/metadata/enrich        (espera ~2s)
+5. /api/proxy/audio            (proxy ~1.5s)
+                              Total: ~5-6s
 ```
 
-**Ahorro:** ~1-1.5s (elimina el hop del proxy).
-
-**Consideraciones:**
-- Las URLs de `googlevideo.com` incluyen `ip=` con la IP del servidor (Render). Pueden funcionar o dar 403 Forbidden desde otra IP.
-- **Flujo recomendado:**
-  1. Intentar `direct=true` → si funciona, reproducción inmediata
-  2. Si da 403 → llamar sin `direct` (usa proxy, siempre funciona)
-  3. Si proxy falla → usar `InnertubeClient` local
-- El cliente (ExoPlayer/Media3) debe configurar User-Agent de Android oficial para evitar cortes.
-
-### Geo-blocking
-Cuando un video está bloqueado por región, el backend responde:
-```json
-HTTP 403
-{ "error": "Video blocked in this region", "blocked": true, "videoId": "..." }
+**Flujo óptimo:**
 ```
-Tu app debe usar su `InnertubeClient` local al recibir `blocked: true`, sin mostrar error al usuario.
-
-### Resolvedores limpiados
-- **Cobalt** — eliminado (todas las instancias muertas).
-- **Invidious** — reducido a instancias que funcionan.
-
-### Otros cambios
-| Feature | Detalle |
-|---|---|
-| `videoId` en search | Ahora incluido siempre en `GET /api/search` |
-| Títulos limpios | Se eliminan `(Official Video)`, `[HD]`, `[4K]`, `(Full Audio)`, etc. |
-| Autocomplete | `GET /api/search/suggestions?q=...` |
-| Rate limiter | 10 search/s, 3 player/s a InnerTube |
-| Refresh automático | Config de InnerTube renovada cada 30min |
-| Cookie jar | Cookies de sesión capturadas del homepage de YouTube |
-
-### Cómo debe responder el cliente cuando un stream falla
-
-```
-HTTP 200 { "url": "..." }           → Usar URL directamente
-HTTP 403 { "blocked": true }        → Usar InnertubeClient local
-HTTP 404 { "error": "..." }         → Reintentar o usar InnertubeClient local
-Error de red / timeout              → Usar InnertubeClient local
+1. /api/stream?id=xxx&direct=true      ← sin refresh, usa caché 6h
+2. EMPEZAR A REPRODUCIR INMEDIATAMENTE ← con la URL del CDN
+3. (en background) /api/lyrics, /api/artist/info, /api/metadata/enrich
+                                        Total: ~1-2s
 ```
 
-### Resumen de endpoints
-| Endpoint | Cambio |
-|---|---|
-| `GET /api/search` | InnerTube cliente propio. <1s. Sin 403. |
-| `GET /api/search/suggestions` | Autocomplete. Cache 60s. |
-| `GET /api/stream` | InnerTube directo como primer resolvedor. 403 si bloqueado. Cache 6h. |
-| `POST /api/metadata/enrich` | Usa InnerTube para buscar tracks (antes youtube-music-api). |
+### Reglas para el cliente
+
+**Streaming:**
+```
+1. Intentar /api/stream?id=xxx&direct=true        → CDN directo (~0s si cache)
+2. Si 403 (IP locked) → /api/stream?id=xxx         → proxy (~1.5s)
+3. Si proxy falla      → InnertubeClient local     → siempre funciona
+```
+
+**No usar `refresh=true`** en reproducción normal. Solo usarlo si el usuario fuerza "refrescar" o si la URL dio error 403/404.
+
+**No bloquear playback** esperando lyrics, artist info o enrich. Esos deben cargarse en segundo plano mientras la música ya suena.
+
+### Endpoints
+
+| Endpoint | Tiempo | Cache |
+|---|---|---|
+| `GET /api/search` | ~1s | 60s |
+| `GET /api/stream` | ~1s (InnerTube) / ~0s (cache) | 6h |
+| `GET /api/search/suggestions` | <500ms | 60s |
+| `GET /api/lyrics` | ~1s | — |
+| `GET /api/artist/info` | ~2s | — |
+| `POST /api/metadata/enrich` | ~2-3s | — |
+| `POST /api/warm` | ~2-3s (pre-resuelve 6 tracks) | — |
+
+### Consideraciones técnicas
+- **`?direct=true`** devuelve URL de `googlevideo.com`. El cliente (ExoPlayer/Media3) debe usar User-Agent de Android oficial para evitar cortes.
+- **IP binding**: las URLs generadas por el backend tienen `ip=...` de Render. Si YouTube las rechaza desde otra IP, caer al proxy o al InnertubeClient local.
+- **Cache de stream**: 6h. Una vez resuelto, `GET /api/stream` sin `refresh` devuelve la misma URL instantáneamente.
+- **Rate limiter**: 10 search/s, 3 player requests/s a InnerTube.
