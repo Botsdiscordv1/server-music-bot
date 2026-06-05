@@ -5,25 +5,25 @@ const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const YTM_BASE = "https://music.youtube.com";
 const YT_BASE = "https://www.youtube.com";
 const API_VERSION = "v1";
-const MAX_RPS = 3;
-const BURST = 5;
 
 let config = null;
 let initPromise = null;
 let refreshInterval = null;
-let requestTimestamps = [];
+const requestCounts = { search: 0, player: 0 };
+let lastReset = Date.now();
 
-function checkRateLimit() {
+function checkRateLimit(endpoint) {
   const now = Date.now();
-  const windowStart = now - 1000;
-  requestTimestamps = requestTimestamps.filter(t => t > windowStart);
-  if (requestTimestamps.length >= MAX_RPS) {
-    const oldest = requestTimestamps[0];
-    const wait = 1000 - (now - oldest);
-    if (wait > 0) throw new Error(`Rate limited: wait ${wait}ms`);
+  if (now - lastReset > 1000) {
+    requestCounts.search = 0;
+    requestCounts.player = 0;
+    lastReset = now;
   }
-  requestTimestamps.push(now);
-  if (requestTimestamps.length > BURST) requestTimestamps.shift();
+  requestCounts[endpoint] = (requestCounts[endpoint] || 0) + 1;
+  const limits = { search: 10, player: 3 };
+  if (requestCounts[endpoint] > limits[endpoint]) {
+    throw new Error(`Rate limited: ${endpoint} (${limits[endpoint]}/s)`);
+  }
 }
 
 const playerCache = new Map();
@@ -63,6 +63,7 @@ function startRefreshTimer() {
     try {
       initPromise = null;
       config = null;
+      playerCache.clear();
       await initialize();
       console.log("[InnerTube] Config refreshed");
     } catch (e) {
@@ -105,7 +106,7 @@ function buildHeaders() {
 }
 
 async function apiRequest(endpoint, data, query = {}) {
-  checkRateLimit();
+  checkRateLimit(endpoint);
   const cfg = await initialize();
   const url = `${YTM_BASE}/youtubei/${cfg.apiVersion}/${endpoint}?${querystring.stringify({ alt: "json", key: cfg.apiKey, ...query })}`;
   const res = await axios.post(url, { ...data, context: buildContext() }, {
@@ -143,11 +144,11 @@ async function searchQuery(query, type = "song") {
 
 function getSearchParams(type) {
   const params = {
-    song: "Eg-KAQwIA",
-    video: "BABGAAgACgA",
-    album: "BAAGAEgACgA",
-    artist: "BAAGAAgASgA",
-    playlist: "BAAGAAgACgB",
+    song: "Eg-KAQwIARAAGAAgACgAMABqChAEEAMQCRAFEAo=",
+    video: "Eg-KAQwIABABGAAgACgAMABqChAEEAMQCRAFEAo=",
+    album: "Eg-KAQwIABAAGAEgACgAMABqChAEEAMQCRAFEAo=",
+    artist: "Eg-KAQwIABAAGAAgASgAMABqChAEEAMQCRAFEAo=",
+    playlist: "Eg-KAQwIABAAGAAgACgBMABqChAEEAMQCRAFEAo=",
   };
   return params[type] || "";
 }
@@ -201,6 +202,20 @@ function parseMusicItem(renderer) {
     isrc: null,
     explicit: false,
   };
+}
+
+async function getSignatureTimestamp() {
+  try {
+    const res = await axios.get(`${YT_BASE}/`, {
+      headers: { "User-Agent": USER_AGENT },
+      timeout: 5000,
+    });
+    const match = res.data.match(/"signatureTimestamp":(\d+)/);
+    if (match) return parseInt(match[1], 10);
+    const match2 = res.data.match(/signatureTimestamp[=:]+(\d+)/);
+    if (match2) return parseInt(match2[1], 10);
+  } catch {}
+  return Math.floor(Date.now() / 1000 / 3600) * 3600;
 }
 
 async function getPlayer(videoId) {
