@@ -471,7 +471,7 @@ const SOURCE_MAP = {
 
 app.get("/api/search", requireApiKey, async (req, res) => {
   try {
-    const q = req.query.q;
+    const q = (req.query.q || "").trim();
     const source = SOURCE_MAP[req.query.source] || "ytmsearch";
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
 
@@ -641,7 +641,7 @@ async function enrichArtworkWithDeezer(tracks) {
 // Returns: { query, tracks: [{ uri, artworkUrl, author, title }] }
 app.get("/api/search/video", requireApiKey, async (req, res) => {
   try {
-    const q = req.query.q;
+    const q = (req.query.q || "").trim();
     if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
 
     const cacheKey = `ytsearch:video:${q}`;
