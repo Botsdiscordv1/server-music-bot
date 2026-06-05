@@ -39,7 +39,8 @@ if (YT_COOKIES_URL) {
     const tmpFile = path.join(os.tmpdir(), "yt-cookies.txt");
     fs.writeFileSync(tmpFile, text);
     YT_COOKIES_PATH = tmpFile;
-    console.log("[SERVER] YouTube cookies downloaded from YT_COOKIES_URL");
+    const lines = text.split("\n").filter(l => l && !l.startsWith("#"));
+    console.log(`[SERVER] YouTube cookies downloaded (${lines.length} entries, ${text.length} bytes)`);
   }).catch(err => {
     console.warn(`[SERVER] Failed to download YouTube cookies: ${err.message}`);
   });
@@ -78,7 +79,11 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
       "--max-sleep", "3",
     ];
     if (PROXY_URL) { args.push("--proxy", PROXY_URL); }
-    if (YT_COOKIES_PATH) { args.push("--cookies", YT_COOKIES_PATH); }
+    if (YT_COOKIES_PATH) {
+      args.push("--cookies", YT_COOKIES_PATH);
+      const size = fs.existsSync(YT_COOKIES_PATH) ? fs.statSync(YT_COOKIES_PATH).size : 0;
+      console.log(`[yt-dlp] Using cookies (${size} bytes): ${YT_COOKIES_PATH}`);
+    }
     const executionTimeout = IS_RENDER ? 12000 : 45000;
     const proc = spawn(YTDLP_PATH, args, { timeout: executionTimeout });
     let stdout = "", stderr = "";
