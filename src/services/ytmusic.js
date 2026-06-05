@@ -15,6 +15,26 @@ async function getApi() {
   return initPromise;
 }
 
+function resetApi() {
+  api = null;
+  initPromise = null;
+}
+
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.warn(`[YTMusic] InnerTube error, resetting session: ${err.message}`);
+    resetApi();
+    try {
+      return await fn();
+    } catch (err2) {
+      console.error(`[YTMusic] InnerTube retry also failed: ${err2.message}`);
+      return null;
+    }
+  }
+}
+
 function extractArtists(item) {
   if (!item.artist) return [];
   if (Array.isArray(item.artist)) return item.artist.map(a => a.name).filter(Boolean);
@@ -29,55 +49,53 @@ function cleanThumbnail(thumbnails) {
 }
 
 async function searchTrack(artist, title) {
-  try {
+  const query = `${artist || ""} ${title || ""}`.trim();
+  if (!query) return null;
+  const result = await withRetry(async () => {
     const ytm = await getApi();
-    const query = `${artist || ""} ${title || ""}`.trim();
-    if (!query) return null;
-    const result = await ytm.search(query, "song");
-    const items = result.content || [];
-    const songs = items
-      .filter(t => t.type === "song")
-      .map(t => ({
-        videoId: t.videoId,
-        title: t.name,
-        authors: extractArtists(t),
-        artist: extractArtists(t)[0] || "",
-        album: t.album?.name || null,
-        duration: t.duration,
-        thumbnail: cleanThumbnail(t.thumbnails),
-        source: "youtube_music",
-      }));
-    return songs.length ? songs : null;
-  } catch {
-    return null;
-  }
+    return await ytm.search(query, "song");
+  });
+  if (!result) return null;
+  const items = result.content || [];
+  const songs = items
+    .filter(t => t.type === "song")
+    .map(t => ({
+      videoId: t.videoId,
+      title: t.name,
+      authors: extractArtists(t),
+      artist: extractArtists(t)[0] || "",
+      album: t.album?.name || null,
+      duration: t.duration,
+      thumbnail: cleanThumbnail(t.thumbnails),
+      source: "youtube_music",
+    }));
+  return songs.length ? songs : null;
 }
 
 async function searchQuery(query, type = "song") {
-  try {
+  if (!query) return [];
+  const result = await withRetry(async () => {
     const ytm = await getApi();
-    if (!query) return [];
-    const result = await ytm.search(query, type);
-    const items = result.content || [];
-    return items
-      .filter(t => t.type === "song")
-      .map(t => ({
-        videoId: t.videoId,
-        title: t.name,
-        artist: extractArtists(t)[0] || "",
-        authors: extractArtists(t),
-        album: t.album?.name || null,
-        duration: t.duration,
-        artworkUrl: cleanThumbnail(t.thumbnails),
-        thumbnail: cleanThumbnail(t.thumbnails),
-        uri: `https://www.youtube.com/watch?v=${t.videoId}`,
-        source: "youtube",
-        isrc: null,
-        explicit: false,
-      }));
-  } catch {
-    return [];
-  }
+    return await ytm.search(query, type);
+  });
+  if (!result) return [];
+  const items = result.content || [];
+  return items
+    .filter(t => t.type === "song")
+    .map(t => ({
+      videoId: t.videoId,
+      title: t.name,
+      artist: extractArtists(t)[0] || "",
+      authors: extractArtists(t),
+      album: t.album?.name || null,
+      duration: t.duration,
+      artworkUrl: cleanThumbnail(t.thumbnails),
+      thumbnail: cleanThumbnail(t.thumbnails),
+      uri: `https://www.youtube.com/watch?v=${t.videoId}`,
+      source: "youtube",
+      isrc: null,
+      explicit: false,
+    }));
 }
 
 async function enrichTracks(tracks) {
