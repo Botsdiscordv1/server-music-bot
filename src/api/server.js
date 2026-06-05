@@ -77,6 +77,10 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
       "--sleep-requests", "0.5",
       "--sleep-interval", "1",
       "--max-sleep", "3",
+      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      "--add-header", "Origin:https://www.youtube.com",
+      "--add-header", "Referer:https://www.youtube.com/",
+      "--extractor-args", "youtube:player_client=android",
     ];
     if (PROXY_URL) { args.push("--proxy", PROXY_URL); }
     if (YT_COOKIES_PATH) {
