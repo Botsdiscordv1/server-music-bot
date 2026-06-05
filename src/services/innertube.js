@@ -64,9 +64,11 @@ async function initialize() {
         gl: ytcfg.GL || "US",
       };
       startRefreshTimer();
+      console.log(`[InnerTube] Initialized: client=${config.clientName} v${config.clientVersion}`);
       return config;
     } catch (err) {
       initPromise = null;
+      console.warn(`[InnerTube] Initialization failed: ${err.message}${err.response ? ` (${err.response.status})` : ""}`);
       throw err;
     }
   })();
@@ -280,13 +282,26 @@ async function getPlayer(videoId) {
 async function getStreamUrl(videoId) {
   const cached = playerCache.get(videoId);
   const player = cached && Date.now() - cached.ts < CACHE_TTL ? cached.data : await getPlayer(videoId);
-  if (!player?.streamingData) return null;
+  if (!player) {
+    console.warn(`[InnerTube] getStreamUrl(${videoId}): getPlayer returned null`);
+    return null;
+  }
+  if (!player.streamingData) {
+    console.warn(`[InnerTube] getStreamUrl(${videoId}): no streamingData in player response`);
+    return null;
+  }
   const { adaptiveFormats, expiresInSeconds } = player.streamingData;
-  if (!adaptiveFormats?.length) return null;
+  if (!adaptiveFormats?.length) {
+    console.warn(`[InnerTube] getStreamUrl(${videoId}): no adaptiveFormats`);
+    return null;
+  }
   const audioFormats = adaptiveFormats.filter(f =>
     f.mimeType?.startsWith("audio/") && f.url
   );
-  if (!audioFormats.length) return null;
+  if (!audioFormats.length) {
+    console.warn(`[InnerTube] getStreamUrl(${videoId}): no audio formats with URL`);
+    return null;
+  }
   audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
   const best = audioFormats[0];
   return best.url;

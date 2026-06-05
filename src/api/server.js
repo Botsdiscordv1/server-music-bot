@@ -334,6 +334,7 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
         setCached(cacheKey, streamUrl);
         return streamUrl;
       }
+      console.warn(`[stream] InnerTube returned null for ${videoId} (no streaming data)`);
     } catch (e) {
       console.warn(`[stream] InnerTube failed for ${videoId}: ${e.message}`);
     }
