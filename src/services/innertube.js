@@ -5,10 +5,29 @@ const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const YTM_BASE = "https://music.youtube.com";
 const YT_BASE = "https://www.youtube.com";
 const API_VERSION = "v1";
+const MAX_RPS = 3;
+const BURST = 5;
 
 let config = null;
 let initPromise = null;
 let refreshInterval = null;
+let requestTimestamps = [];
+
+function checkRateLimit() {
+  const now = Date.now();
+  const windowStart = now - 1000;
+  requestTimestamps = requestTimestamps.filter(t => t > windowStart);
+  if (requestTimestamps.length >= MAX_RPS) {
+    const oldest = requestTimestamps[0];
+    const wait = 1000 - (now - oldest);
+    if (wait > 0) throw new Error(`Rate limited: wait ${wait}ms`);
+  }
+  requestTimestamps.push(now);
+  if (requestTimestamps.length > BURST) requestTimestamps.shift();
+}
+
+const playerCache = new Map();
+const CACHE_TTL = 6 * 60 * 60 * 1000;
 
 async function initialize() {
   if (config) return config;
@@ -86,6 +105,7 @@ function buildHeaders() {
 }
 
 async function apiRequest(endpoint, data, query = {}) {
+  checkRateLimit();
   const cfg = await initialize();
   const url = `${YTM_BASE}/youtubei/${cfg.apiVersion}/${endpoint}?${querystring.stringify({ alt: "json", key: cfg.apiKey, ...query })}`;
   const res = await axios.post(url, { ...data, context: buildContext() }, {
@@ -184,6 +204,8 @@ function parseMusicItem(renderer) {
 }
 
 async function getPlayer(videoId) {
+  const cached = playerCache.get(videoId);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
   try {
     const data = await apiRequest("player", {
       videoId,
@@ -195,6 +217,9 @@ async function getPlayer(videoId) {
       serviceIntegrityDimensions: {},
       thirdPartyUploadUrlSupport: false,
     });
+    if (data?.streamingData) {
+      playerCache.set(videoId, { data, ts: Date.now() });
+    }
     return data;
   } catch (err) {
     console.warn(`[InnerTube] Player failed for ${videoId}: ${err.message}`);
@@ -202,22 +227,9 @@ async function getPlayer(videoId) {
   }
 }
 
-async function getSignatureTimestamp() {
-  try {
-    const res = await axios.get(`${YT_BASE}/`, {
-      headers: { "User-Agent": USER_AGENT },
-      timeout: 5000,
-    });
-    const match = res.data.match(/"signatureTimestamp":(\d+)/);
-    if (match) return parseInt(match[1], 10);
-    const match2 = res.data.match(/signatureTimestamp[=:]+(\d+)/);
-    if (match2) return parseInt(match2[1], 10);
-  } catch {}
-  return Math.floor(Date.now() / 1000 / 3600) * 3600;
-}
-
 async function getStreamUrl(videoId) {
-  const player = await getPlayer(videoId);
+  const cached = playerCache.get(videoId);
+  const player = cached && Date.now() - cached.ts < CACHE_TTL ? cached.data : await getPlayer(videoId);
   if (!player?.streamingData) return null;
   const { adaptiveFormats, expiresInSeconds } = player.streamingData;
   if (!adaptiveFormats?.length) return null;
