@@ -118,21 +118,17 @@ const { getCached, setCached } = (() => {
       const e = mem.get(key);
       if (!e) return null;
 
-      // YouTube/Cobalt check
+      // YouTube expiración de stream
       if (e.url) {
         try {
           const decoded = e.url.includes("%") ? decodeURIComponent(e.url) : e.url;
-          // Expire in seconds (YouTube) or milliseconds (Cobalt exp= parameter)
           const matchSec = decoded.match(/[?&]expire=(\d+)/);
           const matchMs = decoded.match(/[?&]exp=(\d+)/);
           
           if (matchSec || matchMs) {
-            const isCobalt = !!matchMs;
             const expire = matchSec ? parseInt(matchSec[1], 10) : Math.floor(parseInt(matchMs[1], 10) / 1000);
             const nowSec = Math.floor(Date.now() / 1000);
-            // Si es Cobalt (vida útil corta de 5 min), invalidar si expira en menos de 1 minuto (60s)
-            // Si es YouTube (vida útil de 6h), invalidar si expira en menos de 10 minutos (600s)
-            const margin = isCobalt ? 60 : 600;
+            const margin = matchMs ? 60 : 600;
             if (nowSec >= expire - margin) {
               mem.delete(key);
               return null;
@@ -142,8 +138,7 @@ const { getCached, setCached } = (() => {
         } catch (err) {}
       }
 
-      // TTL para Cobalt (evitar caché eterno) o general
-      const ttl = e.url?.includes("cobalt") ? 1 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+      const ttl = 7 * 24 * 60 * 60 * 1000;
       if (Date.now() - e.ts > ttl) {
         mem.delete(key);
         return null;
@@ -276,6 +271,54 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
   });
 }
 
+async function resolveViaInvidious(videoId, isVideo = false) {
+  const instances = [
+    "https://iv.melmac.space",
+    "https://invidious.snopyta.org",
+    "https://yewtu.be"
+  ];
+
+  for (const instance of instances) {
+    try {
+      console.log(`[stream] Trying Invidious instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
+      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, { timeout: 4000 });
+      
+      if (isVideo) {
+        if (res.data && res.data.formatStreams) {
+          const videoStreams = res.data.formatStreams;
+          if (videoStreams.length > 0) {
+            videoStreams.sort((a, b) => {
+              const resA = parseInt(a.qualityLabel) || 0;
+              const resB = parseInt(b.qualityLabel) || 0;
+              return resB - resA;
+            });
+            const bestVideo = videoStreams[0];
+            if (bestVideo.url) {
+              console.log(`[stream] Success resolving video ${videoId} via Invidious (${instance})`);
+              return bestVideo.url;
+            }
+          }
+        }
+      } else {
+        if (res.data && res.data.adaptiveFormats) {
+          const audioFormats = res.data.adaptiveFormats.filter(f => f.type && f.type.startsWith("audio/"));
+          if (audioFormats.length > 0) {
+            audioFormats.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
+            const bestAudio = audioFormats[0];
+            if (bestAudio.url) {
+              console.log(`[stream] Success resolving ${videoId} via Invidious (${instance})`);
+              return bestAudio.url;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[stream] Invidious instance ${instance} failed: ${err.message}`);
+    }
+  }
+  return null;
+}
+
 async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const cacheKey = isVideo ? `${videoId}:video` : videoId;
   
@@ -310,115 +353,6 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   }
 
   // C. Invidious fallback
-  try {
-    const streamUrl = await resolveViaInvidious(videoId, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    console.warn(`[stream] Invidious fallback failed for ${videoId}: ${e.message}`);
-  }
-
-  failedVideoIds.set(cacheKey, Date.now());
-  return null;
-}
-
-async function resolveViaInvidious(videoId, isVideo = false) {
-  const instances = [
-    "https://iv.melmac.space",
-    "https://invidious.snopyta.org",
-    "https://yewtu.be"
-  ];
-
-  for (const instance of instances) {
-    try {
-      console.log(`[stream] Trying Invidious instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
-      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, { timeout: 4000 });
-      
-      if (isVideo) {
-        if (res.data && res.data.formatStreams) {
-          const videoStreams = res.data.formatStreams;
-          if (videoStreams.length > 0) {
-            videoStreams.sort((a, b) => {
-              const resA = parseInt(a.qualityLabel) || 0;
-              const resB = parseInt(b.qualityLabel) || 0;
-              return resB - resA;
-            });
-            const bestVideo = videoStreams[0];
-            if (bestVideo.url) {
-              console.log(`[stream] Success resolving video ${videoId} via Invidious (${instance})`);
-              return bestVideo.url;
-            }
-          }
-        }
-      } else {
-        if (res.data && res.data.adaptiveFormats) {
-          // Encontrar formatos de audio
-          const audioFormats = res.data.adaptiveFormats.filter(f => f.type && f.type.startsWith("audio/"));
-          if (audioFormats.length > 0) {
-            // Ordenar por bitrate descendente para obtener la mejor calidad
-            audioFormats.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
-            const bestAudio = audioFormats[0];
-            if (bestAudio.url) {
-              console.log(`[stream] Success resolving ${videoId} via Invidious (${instance})`);
-              return bestAudio.url;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn(`[stream] Invidious instance ${instance} failed: ${err.message}`);
-    }
-  }
-  return null;
-}
-
-async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
-  const cacheKey = isVideo ? `${videoId}:video` : videoId;
-  
-  // A. yt-dlp
-  try {
-    const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    console.warn(`[stream] yt-dlp failed for ${videoId}: ${e.message}`);
-  }
-
-  // B. Cobalt (como fallback secundario ultra-veloz si yt-dlp falla)
-  try {
-    const streamUrl = await resolveViaCobalt(videoId, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    console.warn(`[stream] Cobalt fallback failed for ${videoId}: ${e.message}`);
-  }
-
-  // C. play-dl (solo si no es Render, y solo si NO es video, ya que play-dl es principalmente audio)
-  if (!IS_RENDER && !isVideo) {
-    try {
-      const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
-        const search = await play.search(videoId, { limit: 1 });
-        return search[0] ? await play.video_info(search[0].url) : null;
-      });
-      if (info) {
-        const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
-        if (stream?.url) {
-          setCached(cacheKey, stream.url);
-          return stream.url;
-        }
-      }
-    } catch (e) {
-      console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
-    }
-  }
-
-  // D. Invidious fallback
   try {
     const streamUrl = await resolveViaInvidious(videoId, isVideo);
     if (streamUrl) {

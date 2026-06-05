@@ -59,9 +59,13 @@ async function withRetry(fn) {
     try {
       return await fn();
     } catch (err) {
-      const isLast = attempt === 2;
+      const is403 = err?.response?.status === 403;
+      if (is403) {
+        console.warn(`[YTMusic] 403 — YouTube bloqueó InnerTube, fallback a Lavalink`);
+        return null;
+      }
       console.warn(`[YTMusic] InnerTube error (attempt ${attempt + 1}/3): ${err.message}`);
-      if (isLast) {
+      if (attempt === 2) {
         console.error(`[YTMusic] All retries exhausted`);
         return null;
       }
