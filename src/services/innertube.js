@@ -109,11 +109,19 @@ async function apiRequest(endpoint, data, query = {}) {
   checkRateLimit(endpoint);
   const cfg = await initialize();
   const url = `${YTM_BASE}/youtubei/${cfg.apiVersion}/${endpoint}?${querystring.stringify({ alt: "json", key: cfg.apiKey, ...query })}`;
-  const res = await axios.post(url, { ...data, context: buildContext() }, {
-    headers: buildHeaders(),
-    timeout: 10000,
-  });
-  return res.data;
+  const body = { ...data, context: buildContext() };
+  try {
+    const res = await axios.post(url, body, {
+      headers: buildHeaders(),
+      timeout: 10000,
+    });
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 400) {
+      console.warn(`[InnerTube] 400 on ${endpoint}: ${JSON.stringify(err.response?.data)?.slice(0, 300)}`);
+    }
+    throw err;
+  }
 }
 
 function extractArtists(item) {
