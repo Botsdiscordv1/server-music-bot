@@ -130,9 +130,6 @@ async function apiRequest(endpoint, data, query = {}) {
     });
     return res.data;
   } catch (err) {
-    if (err.response?.status === 400) {
-      console.warn(`[InnerTube] 400 on ${endpoint}: ${JSON.stringify(err.response?.data)?.slice(0, 300)}`);
-    }
     throw err;
   }
 }
@@ -155,10 +152,7 @@ async function searchQuery(query, type = "song") {
   if (!query) return [];
   try {
     const data = await apiRequest("search", { query, params: getSearchParams(type) });
-    console.log(`[InnerTube] Search response keys: ${Object.keys(data).join(", ")}`);
-    if (data.contents) console.log(`[InnerTube] contents type: ${Object.keys(data.contents).join(", ")}`);
     const items = parseSearchResults(data, type);
-    console.log(`[InnerTube] Search "${query}" → ${items.length} items`);
     return items;
   } catch (err) {
     console.warn(`[InnerTube] Search failed: ${err.message}`);
@@ -178,16 +172,8 @@ function getSearchParams(type) {
 }
 
 function parseSearchResults(data, type) {
-  if (!data?.contents) {
-    console.warn(`[InnerTube] parseSearchResults: no contents (keys: ${Object.keys(data || {}).join(", ")})`);
-    return [];
-  }
-  const tabs = data.contents.tabbedSearchResultsRenderer?.tabs;
-  if (!tabs) {
-    const keys = Object.keys(data.contents);
-    console.warn(`[InnerTube] parseSearchResults: contents has ${keys.join(", ")}, no tabbedSearchResultsRenderer`);
-    return [];
-  }
+  if (!data?.contents?.tabbedSearchResultsRenderer?.tabs) return [];
+  const tabs = data.contents.tabbedSearchResultsRenderer.tabs;
   for (const tab of tabs) {
     const content = tab?.tabRenderer?.content;
     if (!content) continue;
@@ -204,7 +190,6 @@ function parseSearchResults(data, type) {
     }
     if (results.length) return results;
   }
-  console.warn(`[InnerTube] parseSearchResults: no musicShelfRenderer found in ${tabs.length} tabs`);
   return [];
 }
 
@@ -267,9 +252,6 @@ async function getPlayer(videoId) {
     });
     if (data?.streamingData) {
       playerCache.set(videoId, { data, ts: Date.now() });
-      console.log(`[InnerTube] Player success for ${videoId}`);
-    } else {
-      console.warn(`[InnerTube] Player ${videoId}: no streamingData (keys: ${Object.keys(data || {}).join(", ")})`);
     }
     return data;
   } catch (err) {
