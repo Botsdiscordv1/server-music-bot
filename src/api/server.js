@@ -31,18 +31,18 @@ const { HttpsProxyAgent } = require("https-proxy-agent");
 const PROXY_URL = process.env.PROXY_URL || "";
 const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
 
-// Cookies de YouTube para yt-dlp (base64 del cookies.txt exportado del navegador)
+// Cookies de YouTube para yt-dlp (descargadas desde una URL, ej: GitHub Gist privado)
 let YT_COOKIES_PATH = "";
-const YT_COOKIES_B64 = process.env.YT_COOKIES || "";
-if (YT_COOKIES_B64) {
-  try {
+const YT_COOKIES_URL = process.env.YT_COOKIES_URL || "";
+if (YT_COOKIES_URL) {
+  fetch(YT_COOKIES_URL).then(r => r.text()).then(text => {
     const tmpFile = path.join(os.tmpdir(), "yt-cookies.txt");
-    fs.writeFileSync(tmpFile, Buffer.from(YT_COOKIES_B64, "base64").toString("utf-8"));
+    fs.writeFileSync(tmpFile, text);
     YT_COOKIES_PATH = tmpFile;
-    console.log("[SERVER] YouTube cookies loaded from YT_COOKIES env var");
-  } catch (err) {
-    console.warn(`[SERVER] Failed to write YouTube cookies: ${err.message}`);
-  }
+    console.log("[SERVER] YouTube cookies downloaded from YT_COOKIES_URL");
+  }).catch(err => {
+    console.warn(`[SERVER] Failed to download YouTube cookies: ${err.message}`);
+  });
 }
 
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
