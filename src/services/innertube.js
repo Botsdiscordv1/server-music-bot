@@ -35,35 +35,40 @@ async function initialize() {
   if (config) return config;
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    const res = await axios.get(`${YTM_BASE}/`, {
-      headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US" },
-      timeout: 10000,
-    });
-    cookieJar = new tough.CookieJar();
-    const setCookie = res.headers["set-cookie"];
-    if (setCookie) {
-      const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
-      cookies.forEach(c => {
-        try { cookieJar.setCookieSync(tough.Cookie.parse(c), YTM_BASE); } catch {}
+    try {
+      const res = await axios.get(`${YTM_BASE}/`, {
+        headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US" },
+        timeout: 10000,
       });
+      cookieJar = new tough.CookieJar();
+      const setCookie = res.headers["set-cookie"];
+      if (setCookie) {
+        const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
+        cookies.forEach(c => {
+          try { cookieJar.setCookieSync(tough.Cookie.parse(c), YTM_BASE); } catch {}
+        });
+      }
+      let ytcfg = {};
+      res.data.split("ytcfg.set(").forEach(v => {
+        try { Object.assign(ytcfg, JSON.parse(v.split(");")[0])); } catch {}
+      });
+      if (!ytcfg.INNERTUBE_API_KEY) throw new Error("Could not extract ytcfg from YouTube Music");
+      config = {
+        apiKey: ytcfg.INNERTUBE_API_KEY,
+        apiVersion: ytcfg.INNERTUBE_API_VERSION || API_VERSION,
+        clientName: ytcfg.INNERTUBE_CLIENT_NAME || "WEB_REMUX",
+        clientNameValue: ytcfg.INNERTUBE_CONTEXT_CLIENT_NAME || 67,
+        clientVersion: ytcfg.INNERTUBE_CLIENT_VERSION,
+        visitorData: ytcfg.VISITOR_DATA,
+        hl: ytcfg.HL || "en",
+        gl: ytcfg.GL || "US",
+      };
+      startRefreshTimer();
+      return config;
+    } catch (err) {
+      initPromise = null;
+      throw err;
     }
-    let ytcfg = {};
-    res.data.split("ytcfg.set(").forEach(v => {
-      try { Object.assign(ytcfg, JSON.parse(v.split(");")[0])); } catch {}
-    });
-    if (!ytcfg.INNERTUBE_API_KEY) throw new Error("Could not extract ytcfg from YouTube Music");
-    config = {
-      apiKey: ytcfg.INNERTUBE_API_KEY,
-      apiVersion: ytcfg.INNERTUBE_API_VERSION || API_VERSION,
-      clientName: ytcfg.INNERTUBE_CLIENT_NAME || "WEB_REMUX",
-      clientNameValue: ytcfg.INNERTUBE_CONTEXT_CLIENT_NAME || 67,
-      clientVersion: ytcfg.INNERTUBE_CLIENT_VERSION,
-      visitorData: ytcfg.VISITOR_DATA,
-      hl: ytcfg.HL || "en",
-      gl: ytcfg.GL || "US",
-    };
-    startRefreshTimer();
-    return config;
   })();
   return initPromise;
 }
@@ -137,6 +142,10 @@ async function apiRequest(endpoint, data, query = {}) {
   } catch (err) {
     if (err.response) {
       console.warn(`[InnerTube] ${endpoint} HTTP ${err.response.status}: ${err.response.statusText}`);
+      if (err.response.status === 403 || err.response.status === 401) {
+        config = null;
+        initPromise = null;
+      }
     }
     throw err;
   }
