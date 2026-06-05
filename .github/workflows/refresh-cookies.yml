@@ -82,13 +82,13 @@ jobs:
 
       - name: Upload cookies to Gist
         run: |
-          python3 -c "
-import json
-with open('cookies.txt') as f:
-    content = f.read()
-with open('payload.json', 'w') as f:
-    json.dump({'files': {'yt-cookies.txt': {'content': content}}}, f)
-"
+          python3 << 'PYEOF'
+          import json
+          with open('cookies.txt') as f:
+              content = f.read()
+          with open('payload.json', 'w') as f:
+              json.dump({"files": {"yt-cookies.txt": {"content": content}}}, f)
+          PYEOF
           curl -s -L -X PATCH "https://api.github.com/gists/${{ secrets.GIST_ID }}" \
             -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
             -H "Content-Type: application/json" \
