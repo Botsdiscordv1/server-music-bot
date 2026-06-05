@@ -88,7 +88,7 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
       const size = fs.existsSync(YT_COOKIES_PATH) ? fs.statSync(YT_COOKIES_PATH).size : 0;
       console.log(`[yt-dlp] Using cookies (${size} bytes): ${YT_COOKIES_PATH}`);
     }
-    const executionTimeout = IS_RENDER ? 12000 : 45000;
+    const executionTimeout = IS_RENDER ? 20000 : 45000;
     const proc = spawn(YTDLP_PATH, args, { timeout: executionTimeout });
     let stdout = "", stderr = "";
     proc.stdout.on("data", d => stdout += d);
