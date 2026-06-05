@@ -136,7 +136,6 @@ async function apiRequest(endpoint, data, query = {}) {
       timeout: 10000,
       responseType: "json",
       transitional: { clarifyTimeoutError: true },
-      ...axiosProxy(),
     });
     if (typeof res.data !== "object" || res.data === null) {
       throw new Error("Non-JSON response from InnerTube (likely blocking/CAPTCHA)");
@@ -247,7 +246,6 @@ async function getSignatureTimestamp() {
     const res = await axios.get(`${YT_BASE}/`, {
       headers: { "User-Agent": USER_AGENT },
       timeout: 5000,
-      ...axiosProxy(),
     });
     const match = res.data.match(/"signatureTimestamp":(\d+)/);
     if (match) return parseInt(match[1], 10);
