@@ -42,6 +42,8 @@ function cleanTitle(title) {
     .replace(/\s*\(Audio\)\s*/gi, "")
     .replace(/\s*\(Video\)\s*/gi, "")
     .replace(/\s*-\s*Topic$/i, "")
+    .replace(/\s*[\[\(](HD|4K|8K|HQ|Full\s+Audio|Official|Music\s+Video|Lyric\s+Video|Visualizer|Audio\s+Only)[\]\)]\s*/gi, "")
+    .replace(/\s*[\[\(]\d+k[\]\)]\s*/gi, "")
     .trim();
 }
 

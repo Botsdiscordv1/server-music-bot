@@ -25,6 +25,7 @@ GET /api/search?q=<query>&source=ytmsearch
         "duration": 234000,
         "uri": "https://youtube.com/watch?v=...",
         "artworkUrl": "https://...",
+        "videoId": "dQw4w9WgXcQ",
         "source": "youtube"
       }
     ]
@@ -48,7 +49,17 @@ GET /api/search/video?q=<query>
 Nota: artworkUrl es maxresdefault.jpg cuando está disponible.
 Cache: 5 min (igual que /api/search).
 
-====================================================================
+===================================================================
+2c. SUGERENCIAS (Autocomplete)
+===================================================================
+GET /api/search/suggestions?q=<query>
+  Cache: 60 segundos
+→ {
+    "query": "imagin",
+    "suggestions": ["imagine dragons", "imagination", "imagining"]
+  }
+
+===================================================================
 3. LETRAS (LRCLib + Genius fallback)
 ====================================================================
 GET /api/lyrics?track=<titulo>&artist=<artista>&album=<album>
@@ -244,3 +255,8 @@ NOTAS PARA ANDROID:
 - source en search: "ytmsearch" es YouTube Music (mejor calidad),
   "ytsearch" es YouTube normal
 - El APK no necesita Discord SDK, solo HTTP client (OkHttp / Retrofit)
+- IMPORTANTE: el campo videoId en search es el ytVideoId que el cliente
+  necesita para el streaming optimizado. El servidor limpia títulos
+  automáticamente (elimina "Official Video", "[HD]", etc.)
+- Streaming: el servidor prioriza itag 251 (Opus 160kbps) para mejor
+  fidelidad y menor consumo de datos.

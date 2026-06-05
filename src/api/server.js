@@ -130,7 +130,7 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
   return new Promise((resolve, reject) => {
     const format = isVideo 
       ? "best[ext=mp4]/best" 
-      : "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best";
+      : "251/bestaudio[ext=webm]/bestaudio/best";
     const args = [
       videoUrl,
       "-f", format,
@@ -669,6 +669,37 @@ app.get("/api/search", requireApiKey, async (req, res) => {
   }
 });
 
+// ── Search Suggestions (Autocomplete) ─────────────────────────────────
+// GET /api/search/suggestions?q=<query>
+// Returns: { query, suggestions: string[] }
+app.get("/api/search/suggestions", requireApiKey, async (req, res) => {
+  try {
+    const q = req.query.q;
+    if (!q || q.trim().length === 0) {
+      return res.json({ query: q || "", suggestions: [] });
+    }
+
+    const cacheKey = `suggestions:${q}`;
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 60_000) {
+      return res.json(cached.data);
+    }
+
+    const sugRes = await axios.get("https://suggestqueries.google.com/complete/search", {
+      params: { client: "chrome", ds: "yt", q: q.trim() },
+      timeout: 5000,
+    });
+
+    const suggestions = Array.isArray(sugRes.data?.[1]) ? sugRes.data[1] : [];
+    const result = { query: q, suggestions };
+    searchCache.set(cacheKey, { data: result, ts: Date.now() });
+    res.json(result);
+  } catch (err) {
+    console.error("[suggestions] Error:", err.message);
+    res.json({ query: req.query.q || "", suggestions: [] });
+  }
+});
+
 
 async function searchLavalink(source, query) {
   const url = `${LAVALINK_PROTO}://${LAVALINK_HOST}:${LAVALINK_PORT}/v4/loadtracks?identifier=${encodeURIComponent(source + ":" + query)}`;
@@ -676,12 +707,15 @@ async function searchLavalink(source, query) {
     headers: { Authorization: LAVALINK_AUTH },
     timeout: 15000,
   });
+  function cleanAuthor(a) {
+    return (a || "").replace(/\s*-\s*Topic$/i, "").trim();
+  }
   const tracks = (response.data?.data || []).map(t => ({
     id: t.info?.identifier,
     encoded: t.encoded,
-    title: t.info?.title,
-    artist: t.info?.author,
-    author: t.info?.author,
+    title: metadataEnricher.cleanTitle(t.info?.title || ""),
+    artist: cleanAuthor(t.info?.author),
+    author: cleanAuthor(t.info?.author),
     duration: t.info?.duration,
     uri: t.info?.uri,
     artworkUrl: t.info?.artworkUrl,
@@ -691,18 +725,9 @@ async function searchLavalink(source, query) {
     albumUrl: t.pluginInfo?.albumUrl || null,
     isrc: t.info?.isrc || t.pluginInfo?.isrc || null,
     explicit: t.info?.explicit === true || t.pluginInfo?.explicit === true,
+    videoId: t.info?.identifier || null,
   }));
   await enrichExplicitWithDeezerISRC(tracks);
-  try {
-    const enriched = await ytmusic.enrichTracks(tracks);
-    if (enriched) {
-      const enrichedCount = enriched.filter(t => t.ytVideoId).length;
-      console.log(`[YTMusic] Enriched ${enrichedCount}/${enriched.length} tracks for "${query}"`);
-      return enriched;
-    }
-  } catch (e) {
-    console.warn(`[YTMusic] Enrichment error for "${query}": ${e.message}`);
-  }
   return tracks;
 }
 
