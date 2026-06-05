@@ -29,6 +29,35 @@ const fs = require("fs");
 play.setToken({ soundcloud: { client_id: "Yks9HNwSpw5Bo7goMq3jv8cyDYgoLpZr" } });
 console.log("[SERVER] SoundCloud initialized");
 
+// Cookies de YouTube desde cookies.txt o YOUTUBE_COOKIES env var
+const COOKIES_PATH = path.join(__dirname, "..", "..", "cookies.txt");
+let hasYtCookies = false;
+if (process.env.YOUTUBE_COOKIES) {
+  try {
+    fs.writeFileSync(COOKIES_PATH, process.env.YOUTUBE_COOKIES, "utf8");
+    console.log("[COOKIES] Written YOUTUBE_COOKIES env to cookies.txt");
+  } catch (e) { console.warn("[COOKIES] Failed to write cookies:", e.message); }
+}
+if (fs.existsSync(COOKIES_PATH)) {
+  try {
+    const content = fs.readFileSync(COOKIES_PATH, "utf8");
+    // Configurar play-dl con cookies
+    const lines = content.split("\n");
+    const cookies = [];
+    for (const line of lines) {
+      const parts = line.split("\t");
+      if (parts.length >= 7) {
+        cookies.push(`${parts[5].trim()}=${parts[6].trim()}`);
+      }
+    }
+    if (cookies.length) {
+      play.setToken({ youtube: { cookie: cookies.join("; ") } });
+      hasYtCookies = true;
+      console.log(`[COOKIES] YouTube configured with ${cookies.length} cookies`);
+    }
+  } catch (e) { console.warn("[COOKIES] Failed to read cookies:", e.message); }
+}
+
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
 
@@ -58,6 +87,7 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
       "--no-warnings",
       "--extractor-retries", "3",
     ];
+    if (hasYtCookies) args.push("--cookies", COOKIES_PATH);
     const proc = spawn(YTDLP_PATH, args, { timeout: 15000 });
     let stdout = "", stderr = "";
     proc.stdout.on("data", d => stdout += d);
@@ -292,8 +322,8 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   }
 
-  // B. yt-dlp (fallback, saltear en Render — siempre bloqueado)
-  if (!IS_RENDER) {
+  // B. yt-dlp (fallback, saltear en Render sin cookies)
+  if (!IS_RENDER || hasYtCookies) {
     try {
       const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`, isVideo);
       if (streamUrl) {
