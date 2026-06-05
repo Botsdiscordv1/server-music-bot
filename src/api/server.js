@@ -292,39 +292,41 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   }
 
-  // B. yt-dlp (fallback)
-  try {
-    const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    const msg = e.message || "";
-    if (msg.includes("Video unavailable") || msg.includes("This video is not available")) {
-      console.warn(`[stream] Video blocked/unavailable: ${videoId}`);
-      blockedVideoIds.add(cacheKey);
-      return { blocked: true, videoId };
-    }
-    console.warn(`[stream] yt-dlp failed for ${videoId}: ${msg}`);
-  }
-
-  // C. play-dl (audio)
-  if (!isVideo) {
+  // B. yt-dlp (fallback, saltear en Render — siempre bloqueado)
+  if (!IS_RENDER) {
     try {
-      const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
-        const search = await play.search(videoId, { limit: 1 });
-        return search[0] ? await play.video_info(search[0].url) : null;
-      });
-      if (info) {
-        const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
-        if (stream?.url) {
-          setCached(cacheKey, stream.url);
-          return stream.url;
-        }
+      const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`, isVideo);
+      if (streamUrl) {
+        setCached(cacheKey, streamUrl);
+        return streamUrl;
       }
     } catch (e) {
-      console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
+      const msg = e.message || "";
+      if (msg.includes("Video unavailable") || msg.includes("This video is not available")) {
+        console.warn(`[stream] Video blocked/unavailable: ${videoId}`);
+        blockedVideoIds.add(cacheKey);
+        return { blocked: true, videoId };
+      }
+      console.warn(`[stream] yt-dlp failed for ${videoId}: ${msg}`);
+    }
+
+    // C. play-dl (audio, saltear en Render)
+    if (!isVideo) {
+      try {
+        const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
+          const search = await play.search(videoId, { limit: 1 });
+          return search[0] ? await play.video_info(search[0].url) : null;
+        });
+        if (info) {
+          const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
+          if (stream?.url) {
+            setCached(cacheKey, stream.url);
+            return stream.url;
+          }
+        }
+      } catch (e) {
+        console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
+      }
     }
   }
 
