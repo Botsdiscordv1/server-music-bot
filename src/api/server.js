@@ -48,7 +48,7 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
   return new Promise((resolve, reject) => {
     const format = isVideo 
       ? "best[ext=mp4]/best" 
-      : "251/bestaudio[ext=webm]/bestaudio/best";
+      : "bestaudio[ext=webm]/bestaudio/best";
     const args = [
       videoUrl,
       "-f", format,
