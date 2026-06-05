@@ -53,6 +53,33 @@ async function searchTrack(artist, title) {
   }
 }
 
+async function searchQuery(query, type = "song") {
+  try {
+    const ytm = await getApi();
+    if (!query) return [];
+    const result = await ytm.search(query, type);
+    const items = result.content || [];
+    return items
+      .filter(t => t.type === "song")
+      .map(t => ({
+        videoId: t.videoId,
+        title: t.name,
+        artist: extractArtists(t)[0] || "",
+        authors: extractArtists(t),
+        album: t.album?.name || null,
+        duration: t.duration,
+        artworkUrl: cleanThumbnail(t.thumbnails),
+        thumbnail: cleanThumbnail(t.thumbnails),
+        uri: `https://www.youtube.com/watch?v=${t.videoId}`,
+        source: "youtube",
+        isrc: null,
+        explicit: false,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 async function enrichTracks(tracks) {
   if (!tracks || !tracks.length) return tracks;
   const limit = Math.min(tracks.length, 6);
@@ -81,4 +108,4 @@ async function enrichTracks(tracks) {
   return enriched;
 }
 
-module.exports = { searchTrack, enrichTracks };
+module.exports = { searchTrack, searchQuery, enrichTracks };

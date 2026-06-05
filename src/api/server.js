@@ -637,31 +637,40 @@ app.get("/api/search", requireApiKey, async (req, res) => {
       return res.json(cached.data);
     }
 
-    const tracks = await searchLavalink(source, q);
+    // InnerTube directo para ytmsearch (sin hop a Lavalink, ~1s)
+    let tracks = [];
+    if (source === "ytmsearch") {
+      tracks = await ytmusic.searchQuery(q);
+    }
+    // Fallback a Lavalink si InnerTube no dio resultado o no es ytmsearch
+    if (!tracks.length) {
+      tracks = await searchLavalink(source, q);
+    }
+
     if (!tracks.length) return res.json({ query: q, source, tracks: [] });
 
     const result = { query: q, source, tracks };
     searchCache.set(cacheKey, { data: result, ts: Date.now() });
     res.json(result);
 
-    // Procesar en background
+    // Background: enriquecer con Lavalink (encoded, isrc, explicit) + pre-resolver streams
     setImmediate(async () => {
-      // 1) Pre-resolver streams en background (SOLO si no es Render, para ahorrar RAM)
+      try {
+        const lavalinkTracks = await searchLavalink(source, q);
+        if (lavalinkTracks.length) {
+          result.tracks = lavalinkTracks;
+          searchCache.set(cacheKey, { data: result, ts: Date.now() });
+        }
+      } catch (e) {}
+      // Pre-resolver streams
       if (!IS_RENDER) {
-        for (const track of tracks.slice(0, 3)) {
+        const toResolve = result.tracks.slice(0, 3);
+        for (const track of toResolve) {
           if (track.uri) {
             try { await resolveStreamUrl(track.uri, req); } catch (e) {}
           }
         }
       }
-      // 2) Enriquecer metadatos con YouTube Music en background
-      try {
-        const enriched = await ytmusic.enrichTracks(tracks);
-        if (enriched.length) {
-          result.tracks = enriched;
-          searchCache.set(cacheKey, { data: result, ts: Date.now() });
-        }
-      } catch (e) {}
     });
   } catch (err) {
     console.error("Search Error:", err.message);
