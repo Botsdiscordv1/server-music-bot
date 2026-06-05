@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node --max-old-space-size=300 --expose-gc src/index.js",
-    "dev": "node --watch --expose-gc src/index.js"
+    "dev": "node --watch --expose-gc src/index.js",
+    "postinstall": "node scripts/download-nightly-ytdlp.js"
   },
   "dependencies": {
     "@distube/yt-dlp": "^2.0.1",

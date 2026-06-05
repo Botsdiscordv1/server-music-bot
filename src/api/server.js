@@ -416,8 +416,8 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     console.warn(`[stream] yt-dlp failed for ${videoId}: ${msg}`);
   }
 
-  // C. play-dl (solo si no es Render, audio)
-  if (!IS_RENDER && !isVideo) {
+  // C. play-dl (audio)
+  if (!isVideo) {
     try {
       const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
         const search = await play.search(videoId, { limit: 1 });
