@@ -31,6 +31,18 @@ const { HttpsProxyAgent } = require("https-proxy-agent");
 const PROXY_URL = process.env.PROXY_URL || "";
 const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
 
+// Inicialización de SoundCloud
+let soundCloudReady = false;
+play.getFreeClientID().then(id => {
+  play.setToken({ soundcloud: { client_id: id } });
+  soundCloudReady = true;
+  console.log("[SERVER] SoundCloud initialized");
+}).catch(() => {
+  play.setToken({ soundcloud: { client_id: "Yks9HNwSpw5Bo7goMq3jv8cyDYgoLpZr" } });
+  soundCloudReady = true;
+  console.log("[SERVER] SoundCloud initialized (fallback token)");
+});
+
 // Cookies de YouTube para yt-dlp (descargadas desde una URL, ej: GitHub Gist privado)
 let YT_COOKIES_PATH = "";
 const YT_COOKIES_URL = process.env.YT_COOKIES_URL || "";
@@ -455,6 +467,32 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   } catch (e) {
     console.warn(`[stream] Piped fallback failed for ${videoId}: ${e.message}`);
+  }
+
+  // F. SoundCloud fallback
+  if (soundCloudReady) {
+    try {
+      // Search InnerTube for title/artist, then find on SoundCloud
+      const searchResults = await innertube.searchQuery(videoId, "song");
+      if (searchResults?.length) {
+        const track = searchResults[0];
+        const query = `${track.artist || ""} ${track.title || ""}`.trim();
+        if (query) {
+          console.log(`[stream] Trying SoundCloud for ${videoId}: "${query}"`);
+          const scResults = await play.search(query, { source: { soundcloud: "tracks" }, limit: 1 });
+          if (scResults?.length && scResults[0]?.formats?.length) {
+            const stream = await play.stream_from_info(scResults[0]);
+            if (stream?.url) {
+              console.log(`[stream] SoundCloud success for ${videoId}`);
+              setCached(cacheKey, stream.url);
+              return stream.url;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[stream] SoundCloud fallback failed for ${videoId}: ${e.message}`);
+    }
   }
 
   failedVideoIds.set(cacheKey, Date.now());
