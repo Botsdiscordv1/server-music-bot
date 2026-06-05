@@ -31,17 +31,12 @@ const { HttpsProxyAgent } = require("https-proxy-agent");
 const PROXY_URL = process.env.PROXY_URL || "";
 const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
 
-// Inicialización de SoundCloud
-let soundCloudReady = false;
+// Inicialización de SoundCloud (token hardcodeado + refresh en background)
+play.setToken({ soundcloud: { client_id: "Yks9HNwSpw5Bo7goMq3jv8cyDYgoLpZr" } });
+console.log("[SERVER] SoundCloud initialized");
 play.getFreeClientID().then(id => {
-  play.setToken({ soundcloud: { client_id: id } });
-  soundCloudReady = true;
-  console.log("[SERVER] SoundCloud initialized");
-}).catch(() => {
-  play.setToken({ soundcloud: { client_id: "Yks9HNwSpw5Bo7goMq3jv8cyDYgoLpZr" } });
-  soundCloudReady = true;
-  console.log("[SERVER] SoundCloud initialized (fallback token)");
-});
+  if (id) play.setToken({ soundcloud: { client_id: id } });
+}).catch(() => {});
 
 // Cookies de YouTube para yt-dlp (descargadas desde una URL, ej: GitHub Gist privado)
 let YT_COOKIES_PATH = "";
@@ -472,26 +467,33 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   // F. SoundCloud fallback
   if (soundCloudReady) {
     try {
-      const searchResults = await innertube.searchQuery(videoId, "song");
-      if (searchResults?.length) {
-        const track = searchResults[0];
-        const queries = [
-          `${track.artist || ""} ${track.title || ""}`.trim(),
-          track.title || "",
-        ].filter(Boolean);
-        for (const q of queries) {
-          console.log(`[stream] Trying SoundCloud for ${videoId}: "${q}"`);
-          const scResults = await play.search(q, { source: { soundcloud: "tracks" }, limit: 3 });
-          for (const sc of scResults || []) {
-            if (!sc.formats?.length) continue;
-            try {
-              const stream = await play.stream_from_info(sc);
-              if (stream?.url) {
-                console.log(`[stream] SoundCloud success for ${videoId}`);
-                return stream.url;
-              }
-            } catch {}
-          }
+      // Obtener título real del video via oEmbed API (sin auth, bypass anti-bot)
+      const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+      let videoTitle = "";
+      try {
+        const oembedRes = await axios.get(oembedUrl, { timeout: 5000 });
+        videoTitle = oembedRes.data?.title || "";
+      } catch {}
+      // Fallback: buscar por videoId en InnerTube
+      if (!videoTitle) {
+        const searchResults = await innertube.searchQuery(videoId, "song");
+        const track = searchResults?.find(r => r.videoId === videoId) || searchResults?.[0];
+        if (track) videoTitle = track.title || "";
+      }
+      if (!videoTitle) return;
+      const queries = [videoTitle].filter(Boolean);
+      for (const q of queries) {
+        console.log(`[stream] Trying SoundCloud for ${videoId}: "${q}"`);
+        const scResults = await play.search(q, { source: { soundcloud: "tracks" }, limit: 3 });
+        for (const sc of scResults || []) {
+          if (!sc.formats?.length) continue;
+          try {
+            const stream = await play.stream_from_info(sc);
+            if (stream?.url) {
+              console.log(`[stream] SoundCloud success for ${videoId}`);
+              return stream.url;
+            }
+          } catch {}
         }
       }
     } catch (e) {
