@@ -48,13 +48,13 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
   return new Promise((resolve, reject) => {
     const format = isVideo 
       ? "best[ext=mp4]/best" 
-      : "bestaudio[ext=webm]/bestaudio/best";
+      : "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best";
     const args = [
       videoUrl,
       "-f", format,
       "-g",
       "--no-warnings",
-      "--extractor-retries", "2",
+      "--extractor-retries", "3",
       "--sleep-requests", "0.5",
       "--sleep-interval", "1",
       "--max-sleep", "3",
@@ -278,41 +278,45 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
 
 async function resolveViaCobalt(videoId, isVideo = false) {
   const instances = [
-    "https://apicobalt.mgytr.top",
     "https://cobalt.alpha.wolfy.love",
     "https://lime.clxxped.lol",
-    "https://api.qwkuns.me"
+    "https://api.qwkuns.me",
+    "https://apicobalt.mgytr.top"
   ];
-  
+  const endpoints = ["/api/submit", "/"];
+
   for (const instance of instances) {
-    try {
-      console.log(`[stream] Trying Cobalt instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
-      const payload = {
-        url: `https://www.youtube.com/watch?v=${videoId}`
-      };
-      if (isVideo) {
-        payload.downloadMode = "progressive";
-        payload.videoQuality = "720";
-      } else {
-        payload.downloadMode = "audio";
-        payload.audioFormat = "best";
+    for (const ep of endpoints) {
+      try {
+        const url = `${instance}${ep}`;
+        console.log(`[stream] Trying Cobalt: ${url} for ${videoId}`);
+        const payload = {
+          url: `https://www.youtube.com/watch?v=${videoId}`
+        };
+        if (isVideo) {
+          payload.downloadMode = "progressive";
+          payload.videoQuality = "720";
+        } else {
+          payload.downloadMode = "audio";
+          payload.audioFormat = "best";
+        }
+
+        const res = await axios.post(url, payload, {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+          },
+          timeout: 8000
+        });
+
+        if (res.status === 200 && res.data && res.data.url) {
+          console.log(`[stream] Cobalt success: ${url} for ${videoId}`);
+          return res.data.url;
+        }
+      } catch (err) {
+        console.warn(`[stream] Cobalt ${instance}${ep} failed: ${err.message}`);
       }
-      
-      const res = await axios.post(instance, payload, {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-        },
-        timeout: 8000
-      });
-      
-      if (res.status === 200 && res.data && res.data.url) {
-        console.log(`[stream] Success resolving ${videoId} via Cobalt (${instance})`);
-        return res.data.url;
-      }
-    } catch (err) {
-      console.warn(`[stream] Cobalt instance ${instance} failed: ${err.message}`);
     }
   }
   return null;
