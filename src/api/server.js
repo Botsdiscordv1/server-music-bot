@@ -654,24 +654,40 @@ app.get("/api/search/video", requireApiKey, async (req, res) => {
       return res.json(cached.data);
     }
 
-    const raw = await searchLavalink("ytsearch", q);
-
-    // Normalise to the 4 fields the Android app needs.
-    // Upgrade YouTube thumbnails to maxresdefault when possible.
-    const tracks = raw.map((t) => {
-      let artworkUrl = t.artworkUrl || "";
-      // ytimg thumbnails: swap any quality suffix for maxresdefault
-      if (artworkUrl.includes("ytimg.com")) {
-        artworkUrl = artworkUrl
-          .replace(/\/(hqdefault|mqdefault|sddefault|default|maxresdefault)(\.jpg(\?.*)?)?$/, "/maxresdefault.jpg");
-      }
-      return {
-        uri: t.uri,
-        artworkUrl,
-        author: t.author,
-        title: t.title,
-      };
-    });
+    // InnerTube directo primero (evita Lavalink caído)
+    const innertubeResults = await innertube.searchQuery(q, "video");
+    let tracks;
+    if (innertubeResults && innertubeResults.length) {
+      tracks = innertubeResults.map((t) => {
+        let artworkUrl = t.artworkUrl || "";
+        if (artworkUrl.includes("ytimg.com")) {
+          artworkUrl = artworkUrl
+            .replace(/\/(hqdefault|mqdefault|sddefault|default|maxresdefault)(\.jpg(\?.*)?)?$/, "/maxresdefault.jpg");
+        }
+        return {
+          uri: t.uri,
+          artworkUrl,
+          author: t.artist || t.author || "",
+          title: t.title,
+        };
+      });
+    } else {
+      // Fallback Lavalink si InnerTube no devolvió nada
+      const raw = await searchLavalink("ytsearch", q);
+      tracks = raw.map((t) => {
+        let artworkUrl = t.artworkUrl || "";
+        if (artworkUrl.includes("ytimg.com")) {
+          artworkUrl = artworkUrl
+            .replace(/\/(hqdefault|mqdefault|sddefault|default|maxresdefault)(\.jpg(\?.*)?)?$/, "/maxresdefault.jpg");
+        }
+        return {
+          uri: t.uri,
+          artworkUrl,
+          author: t.author,
+          title: t.title,
+        };
+      });
+    }
 
     const result = { query: q, source: "ytsearch", tracks };
     searchCache.set(cacheKey, { data: result, ts: Date.now() });
