@@ -276,39 +276,51 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
   });
 }
 
-async function resolveViaCobalt(videoId, isVideo = false) {
-  const instances = [
-    "https://api.qwkuns.me"
-  ];
+async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
+  const cacheKey = isVideo ? `${videoId}:video` : videoId;
+  
+  // A. yt-dlp (primario)
+  try {
+    const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`, isVideo);
+    if (streamUrl) {
+      setCached(cacheKey, streamUrl);
+      return streamUrl;
+    }
+  } catch (e) {
+    console.warn(`[stream] yt-dlp failed for ${videoId}: ${e.message}`);
+  }
 
-  for (const instance of instances) {
+  // B. play-dl (solo si no es Render, audio)
+  if (!IS_RENDER && !isVideo) {
     try {
-      console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
-      const payload = {
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        downloadMode: isVideo ? "progressive" : "audio",
-        audioFormat: "best",
-        filenameStyle: "basic",
-        disableMetadata: false
-      };
-
-      const res = await axios.post(`${instance}/api/json`, payload, {
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        timeout: 10000
+      const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
+        const search = await play.search(videoId, { limit: 1 });
+        return search[0] ? await play.video_info(search[0].url) : null;
       });
-
-      if (res.status === 200 && res.data?.url) {
-        console.log(`[stream] Cobalt success: ${instance} for ${videoId}`);
-        return res.data.url;
+      if (info) {
+        const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
+        if (stream?.url) {
+          setCached(cacheKey, stream.url);
+          return stream.url;
+        }
       }
-    } catch (err) {
-      console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
+    } catch (e) {
+      console.warn(`[stream] play-dl failed for ${videoId}: ${e.message}`);
     }
   }
+
+  // C. Invidious fallback
+  try {
+    const streamUrl = await resolveViaInvidious(videoId, isVideo);
+    if (streamUrl) {
+      setCached(cacheKey, streamUrl);
+      return streamUrl;
+    }
+  } catch (e) {
+    console.warn(`[stream] Invidious fallback failed for ${videoId}: ${e.message}`);
+  }
+
+  failedVideoIds.set(cacheKey, Date.now());
   return null;
 }
 
@@ -316,14 +328,13 @@ async function resolveViaInvidious(videoId, isVideo = false) {
   const instances = [
     "https://iv.melmac.space",
     "https://invidious.snopyta.org",
-    "https://vid.puffyan.us",
     "https://yewtu.be"
   ];
 
   for (const instance of instances) {
     try {
       console.log(`[stream] Trying Invidious instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
-      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, { timeout: 6000 });
+      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, { timeout: 4000 });
       
       if (isVideo) {
         if (res.data && res.data.formatStreams) {

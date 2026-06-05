@@ -3,6 +3,7 @@ const YouTubeMusic = require("youtube-music-api");
 let api = null;
 let initPromise = null;
 let refreshPromise = null;
+let refreshInterval = null;
 
 async function getApi() {
   if (api) return api;
@@ -11,9 +12,23 @@ async function getApi() {
     const instance = new YouTubeMusic();
     await instance.initalize();
     api = instance;
+    startRefreshTimer();
     return api;
   })();
   return initPromise;
+}
+
+function startRefreshTimer() {
+  if (refreshInterval) clearInterval(refreshInterval);
+  refreshInterval = setInterval(async () => {
+    try {
+      await api.initalize();
+      console.log("[YTMusic] Config refreshed (periodic)");
+    } catch (e) {
+      console.warn(`[YTMusic] Periodic refresh failed: ${e.message}`);
+    }
+  }, 15 * 60 * 1000);
+  if (refreshInterval.unref) refreshInterval.unref();
 }
 
 async function refreshApi() {
@@ -26,6 +41,10 @@ async function refreshApi() {
       console.warn(`[YTMusic] Refresh failed, recreating instance: ${e.message}`);
       api = null;
       initPromise = null;
+      if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+      }
       return getApi();
     }
     return api;
@@ -36,18 +55,21 @@ async function refreshApi() {
 }
 
 async function withRetry(fn) {
-  try {
-    return await fn();
-  } catch (err) {
-    console.warn(`[YTMusic] InnerTube error, refreshing session: ${err.message}`);
-    await refreshApi();
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await fn();
-    } catch (err2) {
-      console.error(`[YTMusic] Retry also failed: ${err2.message}`);
-      return null;
+    } catch (err) {
+      const isLast = attempt === 2;
+      console.warn(`[YTMusic] InnerTube error (attempt ${attempt + 1}/3): ${err.message}`);
+      if (isLast) {
+        console.error(`[YTMusic] All retries exhausted`);
+        return null;
+      }
+      await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      await refreshApi();
     }
   }
+  return null;
 }
 
 function extractArtists(item) {
