@@ -768,14 +768,13 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
     const forceRefresh = refresh === "true" || refresh === "1";
     const isVideo = video === "true" || video === "1" || video === "video" ||
                     id.includes("youtube_video") || id.includes("videoUrl") || id.includes(":video");
+    const direct = req.query.direct === "true" || req.query.direct === "1";
 
     const getFinalStreamUrl = (url) => {
       if (!url) return url;
-      
-      if (req) {
+      if (req && !direct) {
         return `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(url)}`;
       }
-      
       return url;
     };
 
