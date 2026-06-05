@@ -25,6 +25,10 @@ const play = require("play-dl");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { HttpsProxyAgent } = require("https-proxy-agent");
+
+const PROXY_URL = process.env.PROXY_URL || "";
+const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
 
 
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
@@ -59,6 +63,7 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
       "--sleep-interval", "1",
       "--max-sleep", "3",
     ];
+    if (PROXY_URL) { args.push("--proxy", PROXY_URL); }
     const executionTimeout = IS_RENDER ? 12000 : 45000;
     const proc = spawn(YTDLP_PATH, args, { timeout: executionTimeout });
     let stdout = "", stderr = "";
@@ -284,7 +289,9 @@ async function resolveViaInvidious(videoId, isVideo = false) {
   for (const instance of instances) {
     try {
       console.log(`[stream] Trying Invidious instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
-      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, { timeout: 4000 });
+      const axiosOpts = { timeout: 4000 };
+      if (proxyAgent) { axiosOpts.httpsAgent = proxyAgent; axiosOpts.proxy = false; }
+      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, axiosOpts);
       
       if (isVideo) {
         if (res.data && res.data.formatStreams) {

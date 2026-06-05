@@ -1,6 +1,11 @@
 const tough = require("tough-cookie");
 const axios = require("axios");
 const querystring = require("querystring");
+const { HttpsProxyAgent } = require("https-proxy-agent");
+
+const PROXY_URL = process.env.PROXY_URL || "";
+const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
+function axiosProxy() { return proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}; }
 
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 const YTM_BASE = "https://music.youtube.com";
@@ -39,6 +44,7 @@ async function initialize() {
       const res = await axios.get(`${YTM_BASE}/`, {
         headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US" },
         timeout: 10000,
+        ...axiosProxy(),
       });
       cookieJar = new tough.CookieJar();
       const setCookie = res.headers["set-cookie"];
@@ -136,6 +142,7 @@ async function apiRequest(endpoint, data, query = {}) {
       timeout: 10000,
       responseType: "json",
       transitional: { clarifyTimeoutError: true },
+      ...axiosProxy(),
     });
     if (typeof res.data !== "object" || res.data === null) {
       throw new Error("Non-JSON response from InnerTube (likely blocking/CAPTCHA)");
@@ -246,6 +253,7 @@ async function getSignatureTimestamp() {
     const res = await axios.get(`${YT_BASE}/`, {
       headers: { "User-Agent": USER_AGENT },
       timeout: 5000,
+      ...axiosProxy(),
     });
     const match = res.data.match(/"signatureTimestamp":(\d+)/);
     if (match) return parseInt(match[1], 10);
