@@ -2,6 +2,7 @@ const YouTubeMusic = require("youtube-music-api");
 
 let api = null;
 let initPromise = null;
+let refreshPromise = null;
 
 async function getApi() {
   if (api) return api;
@@ -15,21 +16,35 @@ async function getApi() {
   return initPromise;
 }
 
-function resetApi() {
-  api = null;
-  initPromise = null;
+async function refreshApi() {
+  if (!api) return getApi();
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      await api.initalize();
+    } catch (e) {
+      console.warn(`[YTMusic] Refresh failed, recreating instance: ${e.message}`);
+      api = null;
+      initPromise = null;
+      return getApi();
+    }
+    return api;
+  })();
+  const result = await refreshPromise;
+  refreshPromise = null;
+  return result;
 }
 
 async function withRetry(fn) {
   try {
     return await fn();
   } catch (err) {
-    console.warn(`[YTMusic] InnerTube error, resetting session: ${err.message}`);
-    resetApi();
+    console.warn(`[YTMusic] InnerTube error, refreshing session: ${err.message}`);
+    await refreshApi();
     try {
       return await fn();
     } catch (err2) {
-      console.error(`[YTMusic] InnerTube retry also failed: ${err2.message}`);
+      console.error(`[YTMusic] Retry also failed: ${err2.message}`);
       return null;
     }
   }

@@ -278,45 +278,35 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
 
 async function resolveViaCobalt(videoId, isVideo = false) {
   const instances = [
-    "https://cobalt.alpha.wolfy.love",
-    "https://lime.clxxped.lol",
-    "https://api.qwkuns.me",
-    "https://apicobalt.mgytr.top"
+    "https://api.qwkuns.me"
   ];
-  const endpoints = ["/api/submit", "/"];
 
   for (const instance of instances) {
-    for (const ep of endpoints) {
-      try {
-        const url = `${instance}${ep}`;
-        console.log(`[stream] Trying Cobalt: ${url} for ${videoId}`);
-        const payload = {
-          url: `https://www.youtube.com/watch?v=${videoId}`
-        };
-        if (isVideo) {
-          payload.downloadMode = "progressive";
-          payload.videoQuality = "720";
-        } else {
-          payload.downloadMode = "audio";
-          payload.audioFormat = "best";
-        }
+    try {
+      console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
+      const payload = {
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        downloadMode: isVideo ? "progressive" : "audio",
+        audioFormat: "best",
+        filenameStyle: "basic",
+        disableMetadata: false
+      };
 
-        const res = await axios.post(url, payload, {
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-          },
-          timeout: 8000
-        });
+      const res = await axios.post(`${instance}/api/json`, payload, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 10000
+      });
 
-        if (res.status === 200 && res.data && res.data.url) {
-          console.log(`[stream] Cobalt success: ${url} for ${videoId}`);
-          return res.data.url;
-        }
-      } catch (err) {
-        console.warn(`[stream] Cobalt ${instance}${ep} failed: ${err.message}`);
+      if (res.status === 200 && res.data?.url) {
+        console.log(`[stream] Cobalt success: ${instance} for ${videoId}`);
+        return res.data.url;
       }
+    } catch (err) {
+      console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
     }
   }
   return null;
@@ -324,12 +314,10 @@ async function resolveViaCobalt(videoId, isVideo = false) {
 
 async function resolveViaInvidious(videoId, isVideo = false) {
   const instances = [
-    "https://yewtu.be",
-    "https://invidious.flokinet.to",
-    "https://invidious.projectsegfaut.de",
-    "https://inv.tux.im",
-    "https://invidious.privacydev.net",
-    "https://iv.melmac.space"
+    "https://iv.melmac.space",
+    "https://invidious.snopyta.org",
+    "https://vid.puffyan.us",
+    "https://yewtu.be"
   ];
 
   for (const instance of instances) {
