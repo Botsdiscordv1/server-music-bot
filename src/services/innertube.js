@@ -127,9 +127,17 @@ async function apiRequest(endpoint, data, query = {}) {
     const res = await axios.post(url, body, {
       headers: buildHeaders(),
       timeout: 10000,
+      responseType: "json",
+      transitional: { clarifyTimeoutError: true },
     });
+    if (typeof res.data !== "object" || res.data === null) {
+      throw new Error("Non-JSON response from InnerTube (likely blocking/CAPTCHA)");
+    }
     return res.data;
   } catch (err) {
+    if (err.response) {
+      console.warn(`[InnerTube] ${endpoint} HTTP ${err.response.status}: ${err.response.statusText}`);
+    }
     throw err;
   }
 }
@@ -155,7 +163,7 @@ async function searchQuery(query, type = "song") {
     const items = parseSearchResults(data, type);
     return items;
   } catch (err) {
-    console.warn(`[InnerTube] Search failed: ${err.message}`);
+    console.warn(`[InnerTube] Search failed for "${query?.slice(0, 40)}": ${err.message}${err.response ? ` (${err.response.status})` : ""}`);
     return [];
   }
 }
