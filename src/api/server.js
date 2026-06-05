@@ -17,6 +17,7 @@ const {
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
 const ytmusic = require("../services/ytmusic");
+const innertube = require("../services/innertube");
 const metadataEnricher = require("../services/metadataEnricher");
 
 const axios = require("axios");
@@ -325,7 +326,21 @@ async function resolveViaInvidious(videoId, isVideo = false) {
 async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const cacheKey = isVideo ? `${videoId}:video` : videoId;
   
-  // A. yt-dlp (primario)
+  // A. InnerTube directo (más rápido, sin cookies, ~1s)
+  if (!isVideo) {
+    try {
+      const streamUrl = await innertube.getStreamUrl(videoId);
+      if (streamUrl) {
+        console.log(`[stream] InnerTube success for ${videoId}`);
+        setCached(cacheKey, streamUrl);
+        return streamUrl;
+      }
+    } catch (e) {
+      console.warn(`[stream] InnerTube failed for ${videoId}: ${e.message}`);
+    }
+  }
+
+  // B. yt-dlp (fallback)
   try {
     const streamUrl = await ytDlpGetUrl(`https://www.youtube.com/watch?v=${videoId}`, isVideo);
     if (streamUrl) {
@@ -342,7 +357,7 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     console.warn(`[stream] yt-dlp failed for ${videoId}: ${msg}`);
   }
 
-  // B. play-dl (solo si no es Render, audio)
+  // C. play-dl (solo si no es Render, audio)
   if (!IS_RENDER && !isVideo) {
     try {
       const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`).catch(async () => {
@@ -361,7 +376,7 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   }
 
-  // C. Invidious fallback
+  // D. Invidious fallback
   try {
     const streamUrl = await resolveViaInvidious(videoId, isVideo);
     if (streamUrl) {
@@ -470,7 +485,7 @@ app.get("/api/search", requireApiKey, async (req, res) => {
     // InnerTube directo para ytmsearch (sin hop a Lavalink, ~1s)
     let tracks = [];
     if (source === "ytmsearch") {
-      tracks = await ytmusic.searchQuery(q);
+      tracks = await innertube.searchQuery(q);
     }
     // Fallback a Lavalink si InnerTube no dio resultado o no es ytmsearch
     if (!tracks.length) {
