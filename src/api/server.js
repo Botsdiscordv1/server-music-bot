@@ -16,7 +16,6 @@ const {
 } = db;
 const { getLyrics } = require("../services/lrclib");
 const spotify = require("../services/spotify");
-const ytmusic = require("../services/ytmusic");
 const innertube = require("../services/innertube");
 const metadataEnricher = require("../services/metadataEnricher");
 

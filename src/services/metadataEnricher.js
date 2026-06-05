@@ -1,5 +1,5 @@
 const axios = require("axios");
-const ytmusic = require("./ytmusic");
+const ytmusic = require("./innertube");
 const deezer = require("./deezer");
 const { createFingerprint, upsertMetadataPool, getMetadataPool, getMetadataPoolByISRC } = require("../database");
 
