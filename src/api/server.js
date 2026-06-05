@@ -472,21 +472,25 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   // F. SoundCloud fallback
   if (soundCloudReady) {
     try {
-      // Search InnerTube for title/artist, then find on SoundCloud
       const searchResults = await innertube.searchQuery(videoId, "song");
       if (searchResults?.length) {
         const track = searchResults[0];
-        const query = `${track.artist || ""} ${track.title || ""}`.trim();
-        if (query) {
-          console.log(`[stream] Trying SoundCloud for ${videoId}: "${query}"`);
-          const scResults = await play.search(query, { source: { soundcloud: "tracks" }, limit: 1 });
-          if (scResults?.length && scResults[0]?.formats?.length) {
-            const stream = await play.stream_from_info(scResults[0]);
-            if (stream?.url) {
-              console.log(`[stream] SoundCloud success for ${videoId}`);
-              setCached(cacheKey, stream.url);
-              return stream.url;
-            }
+        const queries = [
+          `${track.artist || ""} ${track.title || ""}`.trim(),
+          track.title || "",
+        ].filter(Boolean);
+        for (const q of queries) {
+          console.log(`[stream] Trying SoundCloud for ${videoId}: "${q}"`);
+          const scResults = await play.search(q, { source: { soundcloud: "tracks" }, limit: 3 });
+          for (const sc of scResults || []) {
+            if (!sc.formats?.length) continue;
+            try {
+              const stream = await play.stream_from_info(sc);
+              if (stream?.url) {
+                console.log(`[stream] SoundCloud success for ${videoId}`);
+                return stream.url;
+              }
+            } catch {}
           }
         }
       }
