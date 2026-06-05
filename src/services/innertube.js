@@ -1,11 +1,6 @@
 const tough = require("tough-cookie");
 const axios = require("axios");
 const querystring = require("querystring");
-const { HttpsProxyAgent } = require("https-proxy-agent");
-
-const PROXY_URL = process.env.PROXY_URL || "";
-const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
-function axiosProxy() { return proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}; }
 
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 const YTM_BASE = "https://music.youtube.com";
@@ -43,8 +38,7 @@ async function initialize() {
     try {
       const res = await axios.get(`${YTM_BASE}/`, {
         headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US" },
-        timeout: 10000,
-        ...axiosProxy(),
+      timeout: 10000,
       });
       cookieJar = new tough.CookieJar();
       const setCookie = res.headers["set-cookie"];

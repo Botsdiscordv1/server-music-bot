@@ -25,33 +25,9 @@ const play = require("play-dl");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const os = require("os");
-const { HttpsProxyAgent } = require("https-proxy-agent");
 
-const PROXY_URL = process.env.PROXY_URL || "";
-const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : null;
-
-// Inicialización de SoundCloud (token hardcodeado + refresh en background)
 play.setToken({ soundcloud: { client_id: "Yks9HNwSpw5Bo7goMq3jv8cyDYgoLpZr" } });
 console.log("[SERVER] SoundCloud initialized");
-play.getFreeClientID().then(id => {
-  if (id) play.setToken({ soundcloud: { client_id: id } });
-}).catch(() => {});
-
-// Cookies de YouTube para yt-dlp (descargadas desde una URL, ej: GitHub Gist privado)
-let YT_COOKIES_PATH = "";
-const YT_COOKIES_URL = process.env.YT_COOKIES_URL || "";
-if (YT_COOKIES_URL) {
-  fetch(YT_COOKIES_URL).then(r => r.text()).then(text => {
-    const tmpFile = path.join(os.tmpdir(), "yt-cookies.txt");
-    fs.writeFileSync(tmpFile, text);
-    YT_COOKIES_PATH = tmpFile;
-    const lines = text.split("\n").filter(l => l && !l.startsWith("#"));
-    console.log(`[SERVER] YouTube cookies downloaded (${lines.length} entries, ${text.length} bytes)`);
-  }).catch(err => {
-    console.warn(`[SERVER] Failed to download YouTube cookies: ${err.message}`);
-  });
-}
 
 const YTDLP_BIN = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
 const YTDLP_PATH = path.join(__dirname, "..", "..", "node_modules", "@distube", "yt-dlp", "bin", YTDLP_BIN);
@@ -81,22 +57,8 @@ function ytDlpGetUrl(videoUrl, isVideo = false) {
       "-g",
       "--no-warnings",
       "--extractor-retries", "3",
-      "--sleep-requests", "0.5",
-      "--sleep-interval", "1",
-      "--max-sleep", "3",
-      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      "--add-header", "Origin:https://www.youtube.com",
-      "--add-header", "Referer:https://www.youtube.com/",
-      "--extractor-args", "youtube:player_client=android",
     ];
-    if (PROXY_URL) { args.push("--proxy", PROXY_URL); }
-    if (YT_COOKIES_PATH) {
-      args.push("--cookies", YT_COOKIES_PATH);
-      const size = fs.existsSync(YT_COOKIES_PATH) ? fs.statSync(YT_COOKIES_PATH).size : 0;
-      console.log(`[yt-dlp] Using cookies (${size} bytes): ${YT_COOKIES_PATH}`);
-    }
-    const executionTimeout = IS_RENDER ? 20000 : 45000;
-    const proc = spawn(YTDLP_PATH, args, { timeout: executionTimeout });
+    const proc = spawn(YTDLP_PATH, args, { timeout: 15000 });
     let stdout = "", stderr = "";
     proc.stdout.on("data", d => stdout += d);
     proc.stderr.on("data", d => stderr += d);
@@ -310,83 +272,7 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
   });
 }
 
-async function resolveViaPiped(videoId, isVideo = false) {
-  const instances = [
-    "https://pipedapi.kavin.rocks",
-    "https://pipedapi.telexi.me",
-  ];
-  for (const instance of instances) {
-    try {
-      console.log(`[stream] Trying Piped instance: ${instance} for video ${videoId}`);
-      const axiosOpts = { timeout: 5000 };
-      if (proxyAgent) { axiosOpts.httpsAgent = proxyAgent; axiosOpts.proxy = false; }
-      const res = await axios.get(`${instance}/streams/${videoId}`, axiosOpts);
-      if (!res.data) continue;
-      if (isVideo) {
-        const vStreams = res.data.videoStreams || [];
-        vStreams.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
-        if (vStreams[0]?.url) return vStreams[0].url;
-      } else {
-        const aStreams = res.data.audioStreams || [];
-        aStreams.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
-        if (aStreams[0]?.url) return aStreams[0].url;
-      }
-    } catch (err) {
-      console.warn(`[stream] Piped instance ${instance} failed: ${err.message}`);
-    }
-  }
-  return null;
-}
 
-async function resolveViaInvidious(videoId, isVideo = false) {
-  const instances = [
-    "https://inv.thepixora.com",
-    "https://invidious.f5.si",
-    "https://invidious.nerdvpn.de",
-  ];
-
-  for (const instance of instances) {
-    try {
-      console.log(`[stream] Trying Invidious instance: ${instance} for video ${videoId} (isVideo=${isVideo})`);
-      const axiosOpts = { timeout: 4000 };
-      if (proxyAgent) { axiosOpts.httpsAgent = proxyAgent; axiosOpts.proxy = false; }
-      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, axiosOpts);
-      
-      if (isVideo) {
-        if (res.data && res.data.formatStreams) {
-          const videoStreams = res.data.formatStreams;
-          if (videoStreams.length > 0) {
-            videoStreams.sort((a, b) => {
-              const resA = parseInt(a.qualityLabel) || 0;
-              const resB = parseInt(b.qualityLabel) || 0;
-              return resB - resA;
-            });
-            const bestVideo = videoStreams[0];
-            if (bestVideo.url) {
-              console.log(`[stream] Success resolving video ${videoId} via Invidious (${instance})`);
-              return bestVideo.url;
-            }
-          }
-        }
-      } else {
-        if (res.data && res.data.adaptiveFormats) {
-          const audioFormats = res.data.adaptiveFormats.filter(f => f.type && f.type.startsWith("audio/"));
-          if (audioFormats.length > 0) {
-            audioFormats.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
-            const bestAudio = audioFormats[0];
-            if (bestAudio.url) {
-              console.log(`[stream] Success resolving ${videoId} via Invidious (${instance})`);
-              return bestAudio.url;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn(`[stream] Invidious instance ${instance} failed: ${err.message}`);
-    }
-  }
-  return null;
-}
 
 async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const cacheKey = isVideo ? `${videoId}:video` : videoId;
@@ -442,63 +328,37 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   }
 
-  // D. Invidious fallback
+  // D. SoundCloud fallback
   try {
-    const streamUrl = await resolveViaInvidious(videoId, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    console.warn(`[stream] Invidious fallback failed for ${videoId}: ${e.message}`);
-  }
-
-  // E. Piped fallback
-  try {
-    const streamUrl = await resolveViaPiped(videoId, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    console.warn(`[stream] Piped fallback failed for ${videoId}: ${e.message}`);
-  }
-
-  // F. SoundCloud fallback
-  if (soundCloudReady) {
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    let videoTitle = "";
     try {
-      // Obtener título real del video via oEmbed API (sin auth, bypass anti-bot)
-      const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
-      let videoTitle = "";
-      try {
-        const oembedRes = await axios.get(oembedUrl, { timeout: 5000 });
-        videoTitle = oembedRes.data?.title || "";
-      } catch {}
-      // Fallback: buscar por videoId en InnerTube
-      if (!videoTitle) {
-        const searchResults = await innertube.searchQuery(videoId, "song");
-        const track = searchResults?.find(r => r.videoId === videoId) || searchResults?.[0];
-        if (track) videoTitle = track.title || "";
-      }
-      if (!videoTitle) return;
-      const queries = [videoTitle].filter(Boolean);
-      for (const q of queries) {
-        console.log(`[stream] Trying SoundCloud for ${videoId}: "${q}"`);
-        const scResults = await play.search(q, { source: { soundcloud: "tracks" }, limit: 3 });
-        for (const sc of scResults || []) {
-          if (!sc.formats?.length) continue;
-          try {
-            const stream = await play.stream_from_info(sc);
-            if (stream?.url) {
-              console.log(`[stream] SoundCloud success for ${videoId}`);
-              return stream.url;
-            }
-          } catch {}
-        }
-      }
-    } catch (e) {
-      console.warn(`[stream] SoundCloud fallback failed for ${videoId}: ${e.message}`);
+      const oembedRes = await axios.get(oembedUrl, { timeout: 5000 });
+      videoTitle = oembedRes.data?.title || "";
+    } catch {}
+    if (!videoTitle) {
+      const searchResults = await innertube.searchQuery(videoId, "song");
+      const track = searchResults?.find(r => r.videoId === videoId) || searchResults?.[0];
+      if (track) videoTitle = track.title || "";
     }
+    if (!videoTitle) return;
+    const queries = [videoTitle].filter(Boolean);
+    for (const q of queries) {
+      console.log(`[stream] Trying SoundCloud for ${videoId}: "${q}"`);
+      const scResults = await play.search(q, { source: { soundcloud: "tracks" }, limit: 3 });
+      for (const sc of scResults || []) {
+        if (!sc.formats?.length) continue;
+        try {
+          const stream = await play.stream_from_info(sc);
+          if (stream?.url) {
+            console.log(`[stream] SoundCloud success for ${videoId}`);
+            return stream.url;
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    console.warn(`[stream] SoundCloud fallback failed for ${videoId}: ${e.message}`);
   }
 
   failedVideoIds.set(cacheKey, Date.now());
@@ -529,7 +389,7 @@ app.get("/", (req, res) => {
 
 // API Health Check (Para el App Android)
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", service: "music-api", extractor: "yt-dlp (android client)" });
+  res.json({ status: "ok", service: "music-api" });
 });
 
 // Proxy de audio (Deezer, Spotify, YouTube, etc.) — soporta Range/Partial Content
