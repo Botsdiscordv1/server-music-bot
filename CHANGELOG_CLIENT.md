@@ -29,6 +29,24 @@ La API responde igual en formato, pero con MUCHA más velocidad y confiabilidad.
 4. Invidious `iv.melmac.space` → (fallback final)
 5. Tu `InnertubeClient` local → (último recurso)
 
+### Streaming directo (opcional, más rápido)
+Nuevo parámetro `?direct=true` en `/api/stream` para saltarse el proxy y recibir la URL del CDN directa:
+
+```
+GET /api/stream?id=xxx&direct=true
+→ { "url": "https://rr2...googlevideo.com/..." }
+```
+
+**Ahorro:** ~1-1.5s (elimina el hop del proxy).
+
+**Consideraciones:**
+- Las URLs de `googlevideo.com` incluyen `ip=` con la IP del servidor (Render). Pueden funcionar o dar 403 Forbidden desde otra IP.
+- **Flujo recomendado:**
+  1. Intentar `direct=true` → si funciona, reproducción inmediata
+  2. Si da 403 → llamar sin `direct` (usa proxy, siempre funciona)
+  3. Si proxy falla → usar `InnertubeClient` local
+- El cliente (ExoPlayer/Media3) debe configurar User-Agent de Android oficial para evitar cortes.
+
 ### Geo-blocking
 Cuando un video está bloqueado por región, el backend responde:
 ```json
