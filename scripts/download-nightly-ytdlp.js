@@ -1,7 +1,5 @@
-const https = require("https");
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
 
 const NIGHTLY_URL = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp";
 const YTDLP_DIR = path.join(__dirname, "..", "node_modules", "@distube", "yt-dlp", "bin");
@@ -14,32 +12,31 @@ if (IS_WIN) {
 }
 
 if (!fs.existsSync(YTDLP_DIR)) {
-  console.log(`[nightly] Directory not found: ${YTDLP_DIR}`);
+  console.log(`[nightly] Directory not found: ${YTDLP_DIR}, skipping`);
   process.exit(0);
 }
 
-console.log(`[nightly] Downloading yt-dlp nightly -> ${YTDLP_PATH}`);
-const file = fs.createWriteStream(YTDLP_PATH);
-
-https.get(NIGHTLY_URL, (res) => {
-  if (res.statusCode === 302 || res.statusCode === 301) {
-    https.get(res.headers.location, (res2) => {
-      res2.pipe(file);
-      file.on("finish", () => {
-        file.close();
-        fs.chmodSync(YTDLP_PATH, "755");
-        console.log("[nightly] Download complete");
-      });
+(async () => {
+  console.log(`[nightly] Downloading yt-dlp nightly -> ${YTDLP_PATH}`);
+  try {
+    const axios = require("axios");
+    const res = await axios.get(NIGHTLY_URL, {
+      responseType: "stream",
+      timeout: 30000,
+      maxRedirects: 5,
     });
-    return;
-  }
-  res.pipe(file);
-  file.on("finish", () => {
-    file.close();
+    const writer = fs.createWriteStream(YTDLP_PATH);
+    res.data.pipe(writer);
+    await new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
     fs.chmodSync(YTDLP_PATH, "755");
-    console.log("[nightly] Download complete");
-  });
-}).on("error", (err) => {
-  fs.unlinkSync(YTDLP_PATH);
-  console.error(`[nightly] Download failed: ${err.message}`);
-});
+    const size = fs.statSync(YTDLP_PATH).size;
+    console.log(`[nightly] Download complete (${(size / 1024 / 1024).toFixed(1)} MB)`);
+  } catch (err) {
+    console.error(`[nightly] Download failed: ${err.message}`);
+    if (fs.existsSync(YTDLP_PATH)) fs.unlinkSync(YTDLP_PATH);
+    process.exit(0);
+  }
+})();
