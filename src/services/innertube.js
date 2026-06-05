@@ -1,3 +1,4 @@
+const tough = require("tough-cookie");
 const axios = require("axios");
 const querystring = require("querystring");
 
@@ -9,6 +10,7 @@ const API_VERSION = "v1";
 let config = null;
 let initPromise = null;
 let refreshInterval = null;
+let cookieJar = new tough.CookieJar();
 const requestCounts = { search: 0, player: 0 };
 let lastReset = Date.now();
 
@@ -37,19 +39,28 @@ async function initialize() {
       headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US" },
       timeout: 10000,
     });
-    const matches = res.data.match(/ytcfg\.set\s*\(\s*({.+?})\s*\)\s*;/);
-    if (!matches) throw new Error("Could not extract ytcfg from YouTube Music");
-    const ytcfg = JSON.parse(matches[1]);
+    cookieJar = new tough.CookieJar();
+    const setCookie = res.headers["set-cookie"];
+    if (setCookie) {
+      const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
+      cookies.forEach(c => {
+        try { cookieJar.setCookieSync(tough.Cookie.parse(c), YTM_BASE); } catch {}
+      });
+    }
+    let ytcfg = {};
+    res.data.split("ytcfg.set(").forEach(v => {
+      try { Object.assign(ytcfg, JSON.parse(v.split(");")[0])); } catch {}
+    });
+    if (!ytcfg.INNERTUBE_API_KEY) throw new Error("Could not extract ytcfg from YouTube Music");
     config = {
       apiKey: ytcfg.INNERTUBE_API_KEY,
       apiVersion: ytcfg.INNERTUBE_API_VERSION || API_VERSION,
-      clientName: "WEB_REMUX",
-      clientNameValue: 67,
+      clientName: ytcfg.INNERTUBE_CLIENT_NAME || "WEB_REMUX",
+      clientNameValue: ytcfg.INNERTUBE_CONTEXT_CLIENT_NAME || 67,
       clientVersion: ytcfg.INNERTUBE_CLIENT_VERSION,
       visitorData: ytcfg.VISITOR_DATA,
       hl: ytcfg.HL || "en",
       gl: ytcfg.GL || "US",
-      device: ytcfg.DEVICE || null,
     };
     startRefreshTimer();
     return config;
@@ -74,13 +85,14 @@ function startRefreshTimer() {
 }
 
 function buildContext() {
-  const ctx = {
+  return {
     client: {
       clientName: config.clientName,
       clientVersion: config.clientVersion,
       hl: config.hl,
       gl: config.gl,
       utcOffsetMinutes: -new Date().getTimezoneOffset(),
+      visitorData: config.visitorData || undefined,
     },
     capabilities: {},
     request: {
@@ -89,12 +101,11 @@ function buildContext() {
     },
     user: { enableSafetyMode: false },
   };
-  if (config.visitorData) ctx.client.visitorData = config.visitorData;
-  return ctx;
 }
 
 function buildHeaders() {
-  return {
+  const cookies = cookieJar.getCookieStringSync(YTM_BASE);
+  const h = {
     "User-Agent": USER_AGENT,
     "Accept-Language": "en-US",
     "Content-Type": "application/json",
@@ -103,6 +114,8 @@ function buildHeaders() {
     "X-Goog-Visitor-Id": config.visitorData || "",
     "X-Origin": YTM_BASE,
   };
+  if (cookies) h["Cookie"] = cookies;
+  return h;
 }
 
 async function apiRequest(endpoint, data, query = {}) {
