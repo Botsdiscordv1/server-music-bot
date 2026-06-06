@@ -307,26 +307,16 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
 async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const cacheKey = isVideo ? `${videoId}:video` : videoId;
 
-  // En Render sin cookies: InnerTube bloqueado, ir directo a Cobalt/Invidious
+  // En Render sin cookies: Cobalt + Invidious en paralelo, tomar el primero
   if (IS_RENDER && !hasYtCookies) {
-    console.log(`[stream] Render sin cookies: Cobalt/Invidious directo para ${videoId}`);
-    try {
-      const streamUrl = await resolveViaCobalt(videoId, isVideo);
-      if (streamUrl) {
-        setCached(cacheKey, streamUrl);
-        return streamUrl;
-      }
-    } catch (e) {
-      console.warn(`[stream] Cobalt failed on Render: ${e.message}`);
-    }
-    try {
-      const streamUrl = await resolveViaInvidious(videoId, isVideo);
-      if (streamUrl) {
-        setCached(cacheKey, streamUrl);
-        return streamUrl;
-      }
-    } catch (e) {
-      console.warn(`[stream] Invidious fallback failed on Render: ${e.message}`);
+    console.log(`[stream] Render sin cookies: Cobalt+Invidious paralelo para ${videoId}`);
+    const streamUrl = await raceFirstSuccess([
+      resolveViaCobalt(videoId, isVideo).then(u => u ? { url: u } : null),
+      resolveViaInvidious(videoId, isVideo).then(u => u ? { url: u } : null),
+    ]);
+    if (streamUrl?.url) {
+      setCached(cacheKey, streamUrl.url);
+      return streamUrl.url;
     }
     failedVideoIds.set(cacheKey, Date.now());
     return null;
@@ -385,26 +375,14 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   }
 
-  // D. Cobalt fallback (ya intentado en Render, acá solo local o con cookies)
-  try {
-    const streamUrl = await resolveViaCobalt(videoId, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    console.warn(`[stream] Cobalt fallback failed for ${videoId}: ${e.message}`);
-  }
-
-  // E. Invidious fallback final
-  try {
-    const streamUrl = await resolveViaInvidious(videoId, isVideo);
-    if (streamUrl) {
-      setCached(cacheKey, streamUrl);
-      return streamUrl;
-    }
-  } catch (e) {
-    console.warn(`[stream] Invidious fallback failed for ${videoId}: ${e.message}`);
+  // D/E. Cobalt + Invidious en paralelo
+  const fallback = await raceFirstSuccess([
+    resolveViaCobalt(videoId, isVideo).then(u => u ? { url: u } : null),
+    resolveViaInvidious(videoId, isVideo).then(u => u ? { url: u } : null),
+  ]);
+  if (fallback?.url) {
+    setCached(cacheKey, fallback.url);
+    return fallback.url;
   }
 
   // F. Fallback agotado
