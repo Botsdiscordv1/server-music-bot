@@ -279,6 +279,25 @@ async function getPlayer(videoId) {
   }
 }
 
+function resolveCipher(format) {
+  const cipher = format.signatureCipher || format.cipher;
+  if (!cipher) return null;
+  try {
+    const parsed = querystring.parse(cipher);
+    const url = parsed.url;
+    if (!url) return null;
+    const sp = parsed.sp || "sig";
+    const s = parsed.s;
+    if (s) {
+      const separator = url.includes("?") ? "&" : "?";
+      return `${url}${separator}${sp}=${encodeURIComponent(s)}`;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 async function getStreamUrl(videoId) {
   const cached = playerCache.get(videoId);
   const player = cached && Date.now() - cached.ts < CACHE_TTL ? cached.data : await getPlayer(videoId);
@@ -295,11 +314,36 @@ async function getStreamUrl(videoId) {
     console.warn(`[InnerTube] getStreamUrl(${videoId}): no adaptiveFormats`);
     return null;
   }
-  const audioFormats = adaptiveFormats.filter(f =>
+
+  // 1. Formats with direct URL (legacy)
+  let audioFormats = adaptiveFormats.filter(f =>
     f.mimeType?.startsWith("audio/") && f.url
   );
+
+  // 2. Formats with signatureCipher/cipher (modern YouTube)
   if (!audioFormats.length) {
-    console.warn(`[InnerTube] getStreamUrl(${videoId}): no audio formats with URL`);
+    audioFormats = adaptiveFormats
+      .filter(f => f.mimeType?.startsWith("audio/") && (f.signatureCipher || f.cipher))
+      .map(f => {
+        const resolvedUrl = resolveCipher(f);
+        return resolvedUrl ? { ...f, url: resolvedUrl } : null;
+      })
+      .filter(Boolean);
+    if (audioFormats.length) {
+      console.log(`[InnerTube] getStreamUrl(${videoId}): resolved ${audioFormats.length} format(s) via cipher`);
+    }
+  }
+
+  // 3. Try any format with URL regardless of audio/video
+  if (!audioFormats.length) {
+    audioFormats = adaptiveFormats.filter(f => f.url);
+    if (audioFormats.length) {
+      console.log(`[InnerTube] getStreamUrl(${videoId}): falling back to any format with URL`);
+    }
+  }
+
+  if (!audioFormats.length) {
+    console.warn(`[InnerTube] getStreamUrl(${videoId}): no usable formats found (checked url + cipher)`);
     return null;
   }
   audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));

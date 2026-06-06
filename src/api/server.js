@@ -447,6 +447,10 @@ app.get("/api/proxy/audio", async (req, res) => {
   if (targetUrl.includes("deezer.com")) {
     headers["Referer"] = "https://deezer.com/";
   }
+  if (targetUrl.includes("googlevideo.com")) {
+    headers["Referer"] = "https://music.youtube.com/";
+    headers["Origin"] = "https://music.youtube.com";
+  }
   if (req.headers.range) {
     headers["Range"] = req.headers.range;
   }
@@ -803,6 +807,9 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
 
     const getFinalStreamUrl = (url) => {
       if (!url) return url;
+      if (direct) {
+        return url;
+      }
       if (req) {
         return `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(url)}`;
       }
