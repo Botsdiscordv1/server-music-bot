@@ -307,16 +307,9 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
 async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const cacheKey = isVideo ? `${videoId}:video` : videoId;
 
-  // En Render sin cookies: play-dl (rápido si funciona), luego Cobalt
+  // En Render sin cookies: solo Cobalt (play-dl bloquea en datacenter)
   if (IS_RENDER && !hasYtCookies) {
-    console.log(`[stream] Render sin cookies: play-dl primero para ${videoId}`);
-    try {
-      const url = await Promise.race([
-        play.video_info(`https://www.youtube.com/watch?v=${videoId}`).then(i => play.stream_from_info(i, { quality: 2, discordPlayerCompatibility: true })).then(s => s?.url),
-        new Promise(r => setTimeout(() => r(null), 3000)),
-      ]);
-      if (url) { setCached(cacheKey, url); return url; }
-    } catch {}
+    console.log(`[stream] Render sin cookies: Cobalt directo para ${videoId}`);
     const streamUrl = await resolveViaCobalt(videoId, isVideo);
     if (streamUrl) { setCached(cacheKey, streamUrl); return streamUrl; }
     failedVideoIds.set(cacheKey, Date.now());
