@@ -10,6 +10,7 @@ const db = require("../database");
 const { DiscordUser } = db;
 const {
   findLikedSongByUrl,
+  findLikedSongById,
   updateLikedSongUrl,
   getAllLikedSongsWithBadUrls,
   BAD_URI_REGEX,
@@ -846,7 +847,18 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
       return res.status(404).json({ error: "Cannot resolve Deezer/Spotify URI" });
     }
 
-    const streamUrl = await resolveStreamUrl(id, req, forceRefresh, isVideo);
+    // (E) MongoDB ObjectID → buscar canción en DB y extraer video ID
+    let resolvedId = id;
+    if (/^[0-9a-f]{24}$/i.test(id)) {
+      const found = await findLikedSongById(id, "android") ||
+                    await findLikedSongById(id, "discord");
+      if (found?.track_url) {
+        const vid = extractVideoId(found.track_url);
+        if (vid) resolvedId = vid;
+      }
+    }
+
+    const streamUrl = await resolveStreamUrl(resolvedId, req, forceRefresh, isVideo);
     if (typeof streamUrl === "string") {
       return res.json({ url: getFinalStreamUrl(streamUrl) });
     }

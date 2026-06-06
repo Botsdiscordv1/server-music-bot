@@ -771,6 +771,22 @@ async function findLikedSongByUrl(url, source = "android") {
   };
 }
 
+async function findLikedSongById(id, source = "android") {
+  if (!mongoose.Types.ObjectId.isValid(id)) return null;
+  const { LikedSong } = getModels(source);
+  await whenReady(() => {});
+  const doc = await LikedSong.findById(id).lean().catch(() => null);
+  if (!doc) return null;
+  return {
+    _id: doc._id.toString(),
+    userId: doc.userId,
+    track_title: doc.trackTitle,
+    track_author: doc.trackAuthor,
+    track_url: doc.trackUrl,
+    isrc: doc.isrc,
+  };
+}
+
 async function updateLikedSongUrl(docId, newUrl, source = "android") {
   const { LikedSong } = getModels(source);
   await whenReady(() => {});
@@ -1151,6 +1167,7 @@ module.exports = {
   removeDislikedSong,
   removeDislikedSongById,
   findLikedSongByUrl,
+  findLikedSongById,
   updateLikedSongUrl,
   getAllLikedSongsWithBadUrls,
   BAD_URI_REGEX,
