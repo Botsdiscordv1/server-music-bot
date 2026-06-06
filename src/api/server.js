@@ -415,55 +415,37 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
 async function resolveViaCobalt(videoId, isVideo = false) {
   const instances = [
     "https://fox.kittycat.boo",
-    "https://cobaltapi.cjs.nz",
-    "https://dog.kittycat.boo",
-    "https://api.cobalt.liubquanti.click",
     "https://apicobalt.mgytr.top",
     "https://cobalt.alpha.wolfy.love",
     "https://lime.clxxped.lol",
     "https://api.qwkuns.me",
   ];
-  for (const instance of instances) {
-    // Intentar con payload completo primero (para instancias modernas)
-    for (const payload of [
-      {
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        downloadMode: isVideo ? "progressive" : "audio",
-        audioFormat: "mp3",
-        audioBitrate: "128",
-        filenameStyle: "classic",
-        ...(isVideo ? { videoQuality: "720" } : {}),
-      },
-      {
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        ...(isVideo ? { downloadMode: "progressive", videoQuality: "720" } : { downloadMode: "audio", audioFormat: "best" }),
-      },
-    ]) {
-      try {
-        console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
-        const res = await axios.post(instance, payload, {
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          },
-          timeout: 10000,
-        });
-        if (res.data?.url) {
-          console.log(`[stream] Cobalt success for ${videoId} (${instance})`);
-          return res.data.url;
-        }
-      } catch (err) {
-        if (err.response?.status === 400) {
-          console.log(`[stream] Cobalt ${instance} retrying with simple payload for ${videoId}`);
-          continue;
-        }
-        console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
-        break;
-      }
-    }
+  const payloads = [
+    { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "mp3", audioBitrate: "128", filenameStyle: "classic", ...(isVideo ? { videoQuality: "720" } : {}) },
+    { url: `https://www.youtube.com/watch?v=${videoId}`, ...(isVideo ? { downloadMode: "progressive", videoQuality: "720" } : { downloadMode: "audio", audioFormat: "best" }) },
+  ];
+
+  const promises = instances.flatMap(instance =>
+    payloads.map(payload =>
+      axios.post(instance, payload, {
+        headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        timeout: 5000,
+      }).then(res => res.data?.url ? { instance, url: res.data.url } : null)
+      .catch(() => null)
+    )
+  );
+
+  const result = await raceFirstSuccess(promises);
+  if (result) {
+    console.log(`[stream] Cobalt success for ${videoId} (${result.instance})`);
+    return result.url;
   }
+  console.warn(`[stream] Cobalt all instances failed for ${videoId}`);
   return null;
+}
+
+function raceFirstSuccess(promises) {
+  return Promise.all(promises.map(p => p.then(v => { if (v) throw v; }))).then(() => null).catch(v => v);
 }
 
 async function resolveViaInvidious(videoId, isVideo = false) {
