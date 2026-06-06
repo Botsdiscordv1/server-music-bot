@@ -813,7 +813,7 @@ app.get("/api/stream", requireApiKey, async (req, res) => {
 
     const getFinalStreamUrl = (url) => {
       if (!url) return url;
-      if (req && !direct) {
+      if (req) {
         return `${req.protocol}://${req.get("host")}/api/proxy/audio?url=${encodeURIComponent(url)}`;
       }
       return url;
