@@ -382,30 +382,27 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
 }
 
 async function resolveViaCobalt(videoId, isVideo = false) {
-  const instances = [
-    { url: "https://fox.kittycat.boo", full: true },
-    { url: "https://cobaltapi.cjs.nz", full: false },
-    { url: "https://dog.kittycat.boo", full: false },
-    { url: "https://api.cobalt.liubquanti.click", full: false },
-  ];
-  const fullPayload = { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "mp3", audioBitrate: "128", filenameStyle: "classic", ...(isVideo ? { videoQuality: "720" } : {}) };
   const simplePayload = { url: `https://www.youtube.com/watch?v=${videoId}`, ...(isVideo ? { downloadMode: "progressive", videoQuality: "720" } : { downloadMode: "audio", audioFormat: "best" }) };
+  const fullPayload = { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "mp3", audioBitrate: "128", filenameStyle: "classic", ...(isVideo ? { videoQuality: "720" } : {}) };
 
-  for (const { url: instance, full } of instances) {
+  // dog.kittycat.boo con payload simple funciona para la mayoría
+  for (const instance of ["https://dog.kittycat.boo", "https://fox.kittycat.boo"]) {
     try {
+      const payload = instance.includes("dog") ? simplePayload : fullPayload;
       console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
-      const res = await axios.post(instance, full ? fullPayload : simplePayload, {
+      const res = await axios.post(instance, payload, {
         headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-        timeout: 5000,
+        timeout: 3000,
       });
       if (res.data?.url) {
         console.log(`[stream] Cobalt success for ${videoId} (${instance})`);
         return res.data.url;
       }
     } catch (err) {
-      if (err.response?.status === 400 && full) {
-        console.log(`[stream] Cobalt ${instance} retry simple for ${videoId}`);
+      // Si fox.kittycat.boo da 400, reintentar con payload simple
+      if (instance.includes("fox") && err.response?.status === 400) {
         try {
+          console.log(`[stream] Cobalt ${instance} retry simple for ${videoId}`);
           const res = await axios.post(instance, simplePayload, {
             headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
             timeout: 3000,
@@ -414,12 +411,9 @@ async function resolveViaCobalt(videoId, isVideo = false) {
             console.log(`[stream] Cobalt success for ${videoId} (${instance}, simple)`);
             return res.data.url;
           }
-        } catch (e2) {
-          console.warn(`[stream] Cobalt ${instance} simple also failed: ${e2.message}`);
-        }
-      } else {
-        console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
+        } catch {}
       }
+      console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
     }
   }
   return null;
