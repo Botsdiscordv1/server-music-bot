@@ -307,10 +307,18 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
 async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const cacheKey = isVideo ? `${videoId}:video` : videoId;
 
-  // En Render sin cookies: Cobalt + Invidious en paralelo, tomar el primero
+  // En Render sin cookies: play-dl directo (rápido, ~200ms si funciona), fallback Cobalt+Invidious
   if (IS_RENDER && !hasYtCookies) {
-    console.log(`[stream] Render sin cookies: Cobalt+Invidious paralelo para ${videoId}`);
+    console.log(`[stream] Render sin cookies: play-dl primero para ${videoId}`);
     const streamUrl = await raceFirstSuccess([
+      Promise.race([
+        (async () => {
+          const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`);
+          const stream = await play.stream_from_info(info, { quality: 2, discordPlayerCompatibility: true });
+          return stream?.url ? { url: stream.url } : null;
+        })(),
+        new Promise(r => setTimeout(() => r(null), 3000)),
+      ]).catch(() => null),
       resolveViaCobalt(videoId, isVideo).then(u => u ? { url: u } : null),
       resolveViaInvidious(videoId, isVideo).then(u => u ? { url: u } : null),
     ]);
