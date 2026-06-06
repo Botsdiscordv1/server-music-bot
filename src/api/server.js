@@ -382,37 +382,27 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
 }
 
 async function resolveViaCobalt(videoId, isVideo = false) {
-  const simplePayload = { url: `https://www.youtube.com/watch?v=${videoId}`, ...(isVideo ? { downloadMode: "progressive", videoQuality: "720" } : { downloadMode: "audio", audioFormat: "best" }) };
-  const fullPayload = { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "mp3", audioBitrate: "128", filenameStyle: "classic", ...(isVideo ? { videoQuality: "720" } : {}) };
+  // Instancias y payloads: las originales devuelven URLs directas (audio/mpeg),
+  // las tunnel (dog/fox) requieren proxy pero el cliente Android no las reproduce bien
+  const instances = [
+    { url: "https://apicobalt.mgytr.top", payload: { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "best", ...(isVideo ? { videoQuality: "720" } : {}) } },
+    { url: "https://cobalt.alpha.wolfy.love", payload: { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "best", ...(isVideo ? { videoQuality: "720" } : {}) } },
+    { url: "https://lime.clxxped.lol", payload: { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "best", ...(isVideo ? { videoQuality: "720" } : {}) } },
+    { url: "https://api.qwkuns.me", payload: { url: `https://www.youtube.com/watch?v=${videoId}`, downloadMode: isVideo ? "progressive" : "audio", audioFormat: "best", ...(isVideo ? { videoQuality: "720" } : {}) } },
+  ];
 
-  // dog.kittycat.boo con payload simple funciona para la mayoría
-  for (const instance of ["https://dog.kittycat.boo", "https://fox.kittycat.boo"]) {
+  for (const { url: instance, payload } of instances) {
     try {
-      const payload = instance.includes("dog") ? simplePayload : fullPayload;
       console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
       const res = await axios.post(instance, payload, {
         headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-        timeout: 3000,
+        timeout: 4000,
       });
       if (res.data?.url) {
         console.log(`[stream] Cobalt success for ${videoId} (${instance})`);
         return res.data.url;
       }
     } catch (err) {
-      // Si fox.kittycat.boo da 400, reintentar con payload simple
-      if (instance.includes("fox") && err.response?.status === 400) {
-        try {
-          console.log(`[stream] Cobalt ${instance} retry simple for ${videoId}`);
-          const res = await axios.post(instance, simplePayload, {
-            headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-            timeout: 3000,
-          });
-          if (res.data?.url) {
-            console.log(`[stream] Cobalt success for ${videoId} (${instance}, simple)`);
-            return res.data.url;
-          }
-        } catch {}
-      }
       console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
     }
   }
