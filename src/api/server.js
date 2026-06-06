@@ -306,7 +306,32 @@ async function resolveStreamUrl(identifier, req = null, forceRefresh = false, is
 
 async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
   const cacheKey = isVideo ? `${videoId}:video` : videoId;
-  
+
+  // En Render sin cookies: InnerTube bloqueado, ir directo a Cobalt/Invidious
+  if (IS_RENDER && !hasYtCookies) {
+    console.log(`[stream] Render sin cookies: Cobalt/Invidious directo para ${videoId}`);
+    try {
+      const streamUrl = await resolveViaCobalt(videoId, isVideo);
+      if (streamUrl) {
+        setCached(cacheKey, streamUrl);
+        return streamUrl;
+      }
+    } catch (e) {
+      console.warn(`[stream] Cobalt failed on Render: ${e.message}`);
+    }
+    try {
+      const streamUrl = await resolveViaInvidious(videoId, isVideo);
+      if (streamUrl) {
+        setCached(cacheKey, streamUrl);
+        return streamUrl;
+      }
+    } catch (e) {
+      console.warn(`[stream] Invidious fallback failed on Render: ${e.message}`);
+    }
+    failedVideoIds.set(cacheKey, Date.now());
+    return null;
+  }
+
   // A. InnerTube directo (más rápido, sin cookies, ~1s)
   if (!isVideo) {
     try {
@@ -360,7 +385,7 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     }
   }
 
-  // D. Cobalt fallback (rápido, funciona desde datacenter IPs)
+  // D. Cobalt fallback (ya intentado en Render, acá solo local o con cookies)
   try {
     const streamUrl = await resolveViaCobalt(videoId, isVideo);
     if (streamUrl) {
@@ -371,39 +396,18 @@ async function doResolveStreamUrl(videoId, req = null, isVideo = false) {
     console.warn(`[stream] Cobalt fallback failed for ${videoId}: ${e.message}`);
   }
 
-  // E. SoundCloud fallback
+  // E. Invidious fallback final
   try {
-    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
-    let videoTitle = "";
-    try {
-      const oembedRes = await axios.get(oembedUrl, { timeout: 5000 });
-      videoTitle = oembedRes.data?.title || "";
-    } catch {}
-    if (!videoTitle) {
-      const searchResults = await innertube.searchQuery(videoId, "song");
-      const track = searchResults?.find(r => r.videoId === videoId) || searchResults?.[0];
-      if (track) videoTitle = track.title || "";
-    }
-    if (!videoTitle) return;
-    const queries = [videoTitle].filter(Boolean);
-    for (const q of queries) {
-      console.log(`[stream] Trying SoundCloud for ${videoId}: "${q}"`);
-      const scResults = await play.search(q, { source: { soundcloud: "tracks" }, limit: 3 });
-      for (const sc of scResults || []) {
-        if (!sc.formats?.length) continue;
-        try {
-          const stream = await play.stream_from_info(sc);
-          if (stream?.url) {
-            console.log(`[stream] SoundCloud success for ${videoId}`);
-            return stream.url;
-          }
-        } catch {}
-      }
+    const streamUrl = await resolveViaInvidious(videoId, isVideo);
+    if (streamUrl) {
+      setCached(cacheKey, streamUrl);
+      return streamUrl;
     }
   } catch (e) {
-    console.warn(`[stream] SoundCloud fallback failed for ${videoId}: ${e.message}`);
+    console.warn(`[stream] Invidious fallback failed for ${videoId}: ${e.message}`);
   }
 
+  // F. Fallback agotado
   failedVideoIds.set(cacheKey, Date.now());
   return null;
 }
@@ -414,32 +418,83 @@ async function resolveViaCobalt(videoId, isVideo = false) {
     "https://cobaltapi.cjs.nz",
     "https://dog.kittycat.boo",
     "https://api.cobalt.liubquanti.click",
+    "https://apicobalt.mgytr.top",
+    "https://cobalt.alpha.wolfy.love",
+    "https://lime.clxxped.lol",
+    "https://api.qwkuns.me",
   ];
   for (const instance of instances) {
-    try {
-      console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
-      const payload = {
+    // Intentar con payload completo primero (para instancias modernas)
+    for (const payload of [
+      {
         url: `https://www.youtube.com/watch?v=${videoId}`,
         downloadMode: isVideo ? "progressive" : "audio",
         audioFormat: "mp3",
         audioBitrate: "128",
         filenameStyle: "classic",
-      };
-      if (isVideo) payload.videoQuality = "720";
-      const res = await axios.post(instance, payload, {
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-        timeout: 10000,
-      });
-      if (res.data?.url) {
-        console.log(`[stream] Cobalt success for ${videoId} (${instance})`);
-        return res.data.url;
+        ...(isVideo ? { videoQuality: "720" } : {}),
+      },
+      {
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        ...(isVideo ? { downloadMode: "progressive", videoQuality: "720" } : { downloadMode: "audio", audioFormat: "best" }),
+      },
+    ]) {
+      try {
+        console.log(`[stream] Trying Cobalt: ${instance} for ${videoId}`);
+        const res = await axios.post(instance, payload, {
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
+          timeout: 10000,
+        });
+        if (res.data?.url) {
+          console.log(`[stream] Cobalt success for ${videoId} (${instance})`);
+          return res.data.url;
+        }
+      } catch (err) {
+        if (err.response?.status === 400) {
+          console.log(`[stream] Cobalt ${instance} retrying with simple payload for ${videoId}`);
+          continue;
+        }
+        console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
+        break;
+      }
+    }
+  }
+  return null;
+}
+
+async function resolveViaInvidious(videoId, isVideo = false) {
+  const instances = [
+    "https://yewtu.be",
+    "https://invidious.flokinet.to",
+    "https://invidious.projectsegfaut.de",
+    "https://inv.tux.im",
+    "https://invidious.privacydev.net",
+    "https://iv.melmac.space",
+  ];
+
+  for (const instance of instances) {
+    try {
+      console.log(`[stream] Trying Invidious: ${instance} for ${videoId}`);
+      const res = await axios.get(`${instance}/api/v1/videos/${videoId}`, { timeout: 6000 });
+
+      if (isVideo) {
+        if (res.data?.formatStreams?.length) {
+          const streams = [...res.data.formatStreams].sort((a, b) => (parseInt(b.qualityLabel) || 0) - (parseInt(a.qualityLabel) || 0));
+          if (streams[0]?.url) return streams[0].url;
+        }
+      } else {
+        const audioFormats = (res.data?.adaptiveFormats || []).filter(f => f.type?.startsWith("audio/"));
+        if (audioFormats.length) {
+          audioFormats.sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0));
+          if (audioFormats[0]?.url) return audioFormats[0].url;
+        }
       }
     } catch (err) {
-      console.warn(`[stream] Cobalt ${instance} failed: ${err.message}`);
+      console.warn(`[stream] Invidious ${instance} failed: ${err.message}`);
     }
   }
   return null;
