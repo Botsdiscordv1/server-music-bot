@@ -38,6 +38,7 @@ const likedSongSchema = new mongoose.Schema({
   userId: { type: String, required: true },
   trackTitle: String,
   trackAuthor: String,
+  trackAuthors: { type: [String], default: [] },
   trackUrl: String,
   trackDuration: Number,
   artworkUrl: String,
@@ -57,6 +58,7 @@ const metadataPoolSchema = new mongoose.Schema({
   isrc: String,
   trackTitle: String,
   trackAuthor: String,
+  trackAuthors: [String],
   albumName: String,
   artworkUrl: String,
   thumbnailUrl: String,
@@ -336,10 +338,12 @@ async function addLikedSong(userId, track, source = "android") {
     const genres = track.info.genres || track.pluginInfo?.genres || [];
     const sourceName = track.info.sourceName || "ytmsearch";
     const contentType = sourceName === "youtube_video" ? "VIDEO" : "AUDIO";
+    const trackAuthors = track.pluginInfo?.trackAuthors || track.info?.authors || [];
     await LikedSong.create({
       userId,
       trackTitle: track.info.title,
       trackAuthor: cleanAuthor(track.info.author),
+      trackAuthors: trackAuthors.length ? trackAuthors : undefined,
       trackUrl: track.info.uri,
       trackDuration: track.info.duration,
       artworkUrl: track.info.artworkUrl,
@@ -409,6 +413,7 @@ async function getLikedSongs(userId, limit = 0, source = "android", contentType 
     user_id: doc.userId,
     track_title: doc.trackTitle,
     track_author: doc.trackAuthor,
+    track_authors: doc.trackAuthors || [],
     track_url: doc.trackUrl,
     track_duration: doc.trackDuration,
     artwork_url: doc.artworkUrl,
@@ -746,6 +751,7 @@ async function updateLikedSongMetadata(userId, trackUrl, updates, source = "andr
   const setFields = {};
   if (updates.trackTitle) setFields.trackTitle = updates.trackTitle;
   if (updates.trackAuthor) setFields.trackAuthor = updates.trackAuthor;
+  if (updates.trackAuthors) setFields.trackAuthors = updates.trackAuthors;
   if (updates.artworkUrl) setFields.artworkUrl = updates.artworkUrl;
   if (updates.explicit !== undefined) setFields.explicit = updates.explicit;
   if (updates.genres) setFields.genres = updates.genres;
@@ -766,6 +772,7 @@ async function findLikedSongByUrl(url, source = "android") {
     userId: doc.userId,
     track_title: doc.trackTitle,
     track_author: doc.trackAuthor,
+    track_authors: doc.trackAuthors || [],
     track_url: doc.trackUrl,
     isrc: doc.isrc,
   };
@@ -782,6 +789,7 @@ async function findLikedSongById(id, source = "android") {
     userId: doc.userId,
     track_title: doc.trackTitle,
     track_author: doc.trackAuthor,
+    track_authors: doc.trackAuthors || [],
     track_url: doc.trackUrl,
     isrc: doc.isrc,
   };
@@ -805,6 +813,7 @@ async function getAllLikedSongsWithBadUrls(source = "android") {
       userId: doc.userId,
       track_title: doc.trackTitle,
       track_author: doc.trackAuthor,
+      track_authors: doc.trackAuthors || [],
       track_url: doc.trackUrl,
       isrc: doc.isrc,
     }));
@@ -885,10 +894,12 @@ async function syncUserData(userId, localData, source = "android") {
     for (const song of localData.likedSongs) {
       if (song.trackUrl && cloudUrls.has(song.trackUrl)) continue;
       try {
+        const incomingTrackAuthors = song.trackAuthors || song.track_authors || [];
         await LikedSong.create({
           userId,
           trackTitle: song.trackTitle || song.track_title || "",
           trackAuthor: cleanAuthor(song.trackAuthor || song.track_author || ""),
+          trackAuthors: incomingTrackAuthors.length ? incomingTrackAuthors : undefined,
           trackUrl: song.trackUrl || song.track_url || "",
           trackDuration: song.trackDuration || song.track_duration || 0,
           artworkUrl: song.artworkUrl || song.artwork_url || "",
@@ -906,6 +917,7 @@ async function syncUserData(userId, localData, source = "android") {
       id: s._id.toString(),
       track_title: s.trackTitle,
       track_author: s.trackAuthor,
+      track_authors: s.trackAuthors || [],
       track_url: s.trackUrl,
       track_duration: s.trackDuration,
       artwork_url: s.artworkUrl,
