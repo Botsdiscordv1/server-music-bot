@@ -1131,6 +1131,23 @@ app.get("/api/artists/:userId", requireApiKey, async (req, res) => {
   }
 });
 
+app.post("/api/artist/images", requireApiKey, async (req, res) => {
+  try {
+    const names = req.body;
+    if (!Array.isArray(names)) return res.status(400).json({ error: "Body must be an array of artist names" });
+    const result = {};
+    await Promise.all(names.map(async (name) => {
+      try {
+        const info = await spotify.searchArtistDeezer(name);
+        result[name] = info?.image || null;
+      } catch { result[name] = null; }
+    }));
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/artist-image", requireApiKey, async (req, res) => {
   try {
     const name = req.query.name;
