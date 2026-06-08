@@ -970,26 +970,38 @@ app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
       trackAuthors = ordered;
     }
 
-    // 3. Buscar artistas completos vía Lavalink (para tracks sin feat. visible)
+    // 3. Buscar artistas completos vía Lavalink + fallback YouTube Music
     try {
       const searchQuery = `${trackAuthor} ${trackTitle}`;
+      let searchArtists = [];
+
+      // 3a. Intentar Lavalink primero
       const lavalinkTracks = await Promise.race([
-        searchLavalink("ytmsearch", searchQuery),
+        searchLavalink("ytmsearch", searchQuery).catch(() => []),
         new Promise(r => setTimeout(() => r([]), 2000))
       ]);
       if (lavalinkTracks.length > 0 && lavalinkTracks[0].author) {
-        const lavalinkArtists = lavalinkTracks[0].author.split(artistSplit)
+        searchArtists = lavalinkTracks[0].author.split(artistSplit)
           .map(s => s.trim()).filter(Boolean);
-        if (lavalinkArtists.length > trackAuthors.length) {
-          const merged = new Map();
-          for (const a of [...lavalinkArtists, ...trackAuthors]) {
-            const key = a.toLowerCase();
-            if (!merged.has(key)) merged.set(key, a);
-          }
-          const combined = [...merged.values()];
-          trackAuthor = combined[0];
-          trackAuthors = combined;
+      }
+
+      // 3b. Si Lavalink no dio resultados, probar con YouTube Music directo
+      if (searchArtists.length <= 1) {
+        const ytResults = await innertube.searchTrack(trackAuthor, trackTitle);
+        if (ytResults?.length > 0 && ytResults[0].authors?.length > 1) {
+          searchArtists = ytResults[0].authors;
         }
+      }
+
+      if (searchArtists.length > trackAuthors.length) {
+        const merged = new Map();
+        for (const a of [...searchArtists, ...trackAuthors]) {
+          const key = a.toLowerCase();
+          if (!merged.has(key)) merged.set(key, a);
+        }
+        const combined = [...merged.values()];
+        trackAuthor = combined[0];
+        trackAuthors = combined;
       }
     } catch {}
 
