@@ -946,28 +946,32 @@ app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
     const connSource = req.provider || "android";
     let { trackTitle, trackAuthor, trackAuthors, trackUrl, trackDuration, artworkUrl, isrc, explicit, genres, source } = req.body;
 
-    // Parsear artistas invitados desde el título (feat., ft., with)
-    const featRegex = /(?:\s*[\[\(])?(?:feat\.?|ft\.?|with)\s+([^\]\)]+)[\]\)]?/i;
-    const featMatch = trackTitle.match(featRegex);
-    if (featMatch) {
-      const featuredRaw = featMatch[1];
-      const featuredParsed = featuredRaw.split(/[,;&]|\s+&\s+|\s+y\s+|\s+e\s+/i).map(s => s.trim()).filter(Boolean);
-      // Si el array enviado solo contiene el artista principal, agregar los invitados
-      const existing = new Set((trackAuthors || []).map(a => a.toLowerCase()));
-      // Asegurar que el artista principal esté primero
-      if (!existing.has(trackAuthor.toLowerCase())) {
-        trackAuthors = [trackAuthor];
-        existing.add(trackAuthor.toLowerCase());
-      }
-      for (const feat of featuredParsed) {
-        if (!existing.has(feat.toLowerCase())) {
-          trackAuthors = [...(trackAuthors || [trackAuthor]), feat];
-          existing.add(feat.toLowerCase());
-        }
-      }
-      // Limpiar feat del título
-      trackTitle = trackTitle.replace(/\s*[\[\(](?:feat\.?|ft\.?|with)\s+[^\]\)]+[\]\)]/i, '').trim();
+    // Separadores para detectar múltiples artistas en trackAuthor y feat.
+    const artistSplit = /[,;&]|\s+&\s+|\s+y\s+|\s+e\s+|\s*\/\s*|\s+ duet\s+|\s+x\s+/i;
+    const featRegex = /(?:\s*[\[\(])?(?:feat\.?|ft\.?|featuring|with)\s+([^\]\)]+)[\]\)]?/i;
+
+    // 1. Extraer artistas desde trackAuthor (ej. "Bad Bunny, J Balvin, Arcángel")
+    //    y desde el título (feat., ft., with)
+    const allRaw = [
+      ...trackAuthor.split(artistSplit),
+      ...(trackTitle.match(featRegex)?.[1]?.split(artistSplit) || [])
+    ].map(s => s.trim()).filter(Boolean);
+
+    // 2. Deducir: primero es el principal, el resto son invitados
+    const seen = new Map();
+    const ordered = [];
+    for (const a of allRaw) {
+      const key = a.toLowerCase();
+      if (!seen.has(key)) { seen.set(key, a); ordered.push(a); }
     }
+
+    if (ordered.length >= 1) {
+      trackAuthor = ordered[0];
+      trackAuthors = ordered;
+    }
+
+    // 3. Limpiar feat del título
+    trackTitle = trackTitle.replace(featRegex, '').replace(/\s{2,}/, ' ').trim();
 
     const mockTrack = {
       info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "", explicit: explicit === true, genres: genres || [], sourceName: source || "ytmsearch" },
