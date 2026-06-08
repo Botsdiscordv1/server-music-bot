@@ -970,7 +970,30 @@ app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
       trackAuthors = ordered;
     }
 
-    // 3. Limpiar feat del título
+    // 3. Buscar artistas completos vía Lavalink (para tracks sin feat. visible)
+    try {
+      const searchQuery = `${trackAuthor} ${trackTitle}`;
+      const lavalinkTracks = await Promise.race([
+        searchLavalink("ytmsearch", searchQuery),
+        new Promise(r => setTimeout(() => r([]), 2000))
+      ]);
+      if (lavalinkTracks.length > 0 && lavalinkTracks[0].author) {
+        const lavalinkArtists = lavalinkTracks[0].author.split(artistSplit)
+          .map(s => s.trim()).filter(Boolean);
+        if (lavalinkArtists.length > trackAuthors.length) {
+          const merged = new Map();
+          for (const a of [...lavalinkArtists, ...trackAuthors]) {
+            const key = a.toLowerCase();
+            if (!merged.has(key)) merged.set(key, a);
+          }
+          const combined = [...merged.values()];
+          trackAuthor = combined[0];
+          trackAuthors = combined;
+        }
+      }
+    } catch {}
+
+    // 4. Limpiar feat del título
     trackTitle = trackTitle.replace(featRegex, '').replace(/\s{2,}/, ' ').trim();
 
     const mockTrack = {
