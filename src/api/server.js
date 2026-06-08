@@ -1678,7 +1678,7 @@ app.get("/api/auth/discord/callback", (req, res, next) => {
       return res.status(401).json({ error: "auth_failed" });
     }
     const token = signToken(user, "discord");
-    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+    const clientUrl = process.env.CLIENT_URL || "auris://auth";
 
     // App (HTTP nativo): JSON directo. Navegador/WebView: 302 redirect
     const ua = (req.headers["user-agent"] || "").toLowerCase();
@@ -1696,7 +1696,7 @@ app.get("/api/auth/google/callback", (req, res, next) => {
       return res.status(401).json({ error: "auth_failed" });
     }
     const token = signToken(user);
-    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+    const clientUrl = process.env.CLIENT_URL || "auris://auth";
 
     const ua = (req.headers["user-agent"] || "").toLowerCase();
     if (ua.includes("okhttp") || ua.includes("dalvik")) {
@@ -1762,7 +1762,7 @@ app.get("/api/auth/google/callback", (req, res, next) => {
       return res.status(401).json({ error: "auth_failed" });
     }
     const token = signToken(user);
-    const clientUrl = process.env.CLIENT_URL || "musicapp://auth";
+    const clientUrl = process.env.CLIENT_URL || "auris://auth";
 
     const ua = (req.headers["user-agent"] || "").toLowerCase();
     if (ua.includes("android") || ua.includes("okhttp") || ua.includes("dalvik")) {
