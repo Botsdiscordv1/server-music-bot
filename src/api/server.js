@@ -944,7 +944,31 @@ app.post("/api/likes/:userId", requireApiKey, async (req, res) => {
   try {
     const userId = req.userId || req.params.userId;
     const connSource = req.provider || "android";
-    const { trackTitle, trackAuthor, trackAuthors, trackUrl, trackDuration, artworkUrl, isrc, explicit, genres, source } = req.body;
+    let { trackTitle, trackAuthor, trackAuthors, trackUrl, trackDuration, artworkUrl, isrc, explicit, genres, source } = req.body;
+
+    // Parsear artistas invitados desde el título (feat., ft., with)
+    const featRegex = /(?:\s*[\[\(])?(?:feat\.?|ft\.?|with)\s+([^\]\)]+)[\]\)]?/i;
+    const featMatch = trackTitle.match(featRegex);
+    if (featMatch) {
+      const featuredRaw = featMatch[1];
+      const featuredParsed = featuredRaw.split(/[,;&]|\s+&\s+|\s+y\s+|\s+e\s+/i).map(s => s.trim()).filter(Boolean);
+      // Si el array enviado solo contiene el artista principal, agregar los invitados
+      const existing = new Set((trackAuthors || []).map(a => a.toLowerCase()));
+      // Asegurar que el artista principal esté primero
+      if (!existing.has(trackAuthor.toLowerCase())) {
+        trackAuthors = [trackAuthor];
+        existing.add(trackAuthor.toLowerCase());
+      }
+      for (const feat of featuredParsed) {
+        if (!existing.has(feat.toLowerCase())) {
+          trackAuthors = [...(trackAuthors || [trackAuthor]), feat];
+          existing.add(feat.toLowerCase());
+        }
+      }
+      // Limpiar feat del título
+      trackTitle = trackTitle.replace(/\s*[\[\(](?:feat\.?|ft\.?|with)\s+[^\]\)]+[\]\)]/i, '').trim();
+    }
+
     const mockTrack = {
       info: { title: trackTitle, author: trackAuthor, uri: trackUrl || "", duration: trackDuration || 0, artworkUrl: artworkUrl || "", explicit: explicit === true, genres: genres || [], sourceName: source || "ytmsearch" },
       pluginInfo: { isrc: isrc || null, trackAuthors: trackAuthors || [] }
