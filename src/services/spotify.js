@@ -15,7 +15,18 @@ let spotifyDown = false;
 let spotifyDownChecked = 0;
 const SPOTIFY_RETRY_AFTER = 5 * 60 * 1000; // 5 min antes de reintentar
 
+let lastSpotifyLog = 0;
+
 async function getSpotifyToken() {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
+    spotifyDown = true;
+    spotifyDownChecked = Infinity;
+    if (Date.now() - lastSpotifyLog > 60000) {
+      console.error("[Spotify] Credentials not configured — Spotify features disabled");
+      lastSpotifyLog = Date.now();
+    }
+    throw new Error("Spotify credentials not configured");
+  }
   if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
   try {
     const res = await axios.post("https://accounts.spotify.com/api/token",
@@ -32,7 +43,10 @@ async function getSpotifyToken() {
     spotifyTokenExpiry = Date.now() + (res.data.expires_in - 60) * 1000;
     return spotifyToken;
   } catch (err) {
-    console.error("[Spotify API] Token error:", err.message);
+    if (Date.now() - lastSpotifyLog > 60000) {
+      console.error("[Spotify] Token error:", err.message);
+      lastSpotifyLog = Date.now();
+    }
     throw err;
   }
 }
