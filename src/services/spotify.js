@@ -188,8 +188,8 @@ async function searchArtistDeezer(name) {
       }
       // Aceptar si Jaccard >= 0.3, o si >= 0.15 y tiene más fans que cualquier otro sin solapamiento
       let artist = (best && bestScore >= 0.25) ? best : null;
-      // Si no hay match bueno, probar contains solo si el nombre es lo suficientemente distintivo
-      if (!artist && nameLower.length >= 5) {
+      // Si no hay match bueno, probar contains solo si el nombre es muy distintivo (>6 chars)
+      if (!artist && nameLower.length > 6) {
         for (const a of candidates) {
           if (a.name.toLowerCase().includes(nameLower) || nameLower.includes(a.name.toLowerCase())) {
             if (!artist || a.fans > artist.fans) artist = a;
@@ -481,13 +481,10 @@ function cleanArtistName(name) {
 }
 
 // Jaccard similarity entre conjuntos de palabras (sin contar palabras ≤2 chars)
-function normalizeStr(s) {
-  return s.normalize("NFD").replace(/\p{Diacritic}/gu, "");
-}
 function artistNameSimilar(a, b) {
-  const wordsA = normalizeStr(a).toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  const wordsB = normalizeStr(b).toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  if (!wordsA.length || !wordsB.length) return normalizeStr(a).toLowerCase() === normalizeStr(b).toLowerCase() ? 1 : 0;
+  const wordsA = a.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const wordsB = b.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (!wordsA.length || !wordsB.length) return a.toLowerCase() === b.toLowerCase() ? 1 : 0;
   const setA = new Set(wordsA);
   const setB = new Set(wordsB);
   let intersection = 0;

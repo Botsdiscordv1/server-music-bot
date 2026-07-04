@@ -7,7 +7,6 @@ const userSchema = new mongoose.Schema({
   password: { type: String },
   avatar: { type: String, default: "" },
   discordId: { type: String, unique: true, sparse: true },
-  googleId: { type: String, unique: true, sparse: true },
 }, { timestamps: true });
 
 userSchema.pre("save", async function () {
@@ -28,7 +27,6 @@ userSchema.methods.toPublicJSON = function () {
     email: this.email,
     avatar: this.avatar,
     discordId: this.discordId,
-    googleId: this.googleId,
     createdAt: this.createdAt,
   };
 };

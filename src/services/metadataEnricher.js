@@ -1,5 +1,5 @@
 const axios = require("axios");
-const ytmusic = require("./innertube");
+const ytmusic = require("./ytmusic");
 const deezer = require("./deezer");
 const { createFingerprint, upsertMetadataPool, getMetadataPool, getMetadataPoolByISRC } = require("../database");
 
@@ -42,8 +42,6 @@ function cleanTitle(title) {
     .replace(/\s*\(Audio\)\s*/gi, "")
     .replace(/\s*\(Video\)\s*/gi, "")
     .replace(/\s*-\s*Topic$/i, "")
-    .replace(/\s*[\[\(](HD|4K|8K|HQ|Full\s+Audio|Official|Music\s+Video|Lyric\s+Video|Visualizer|Audio\s+Only)[\]\)]\s*/gi, "")
-    .replace(/\s*[\[\(]\d+k[\]\)]\s*/gi, "")
     .trim();
 }
 
@@ -153,12 +151,7 @@ async function enrichSingleTrack(artist, title, isrc) {
 
   const sources = [];
 
-  let lavalinkTracks = [];
-  try {
-    lavalinkTracks = await searchLavalink("ytmsearch", `${artist} ${title}`);
-  } catch (e) {
-    lavalinkTracks = [];
-  }
+  const lavalinkTracks = await searchLavalink("ytmsearch", `${artist} ${title}`);
   if (lavalinkTracks.length > 0) {
     const t = lavalinkTracks[0];
     await enrichExplicitWithDeezerISRC([t]);

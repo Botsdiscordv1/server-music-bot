@@ -1,7 +1,7 @@
 MUSIC API — Endpoints para Android
 ====================================
-Base URL: http://<server>:3000
-Auth: Pasar ?api_key=KEY o header X-Api-Key: KEY
+Base URL: http://<server>:3001
+Auth: Opcional — pasar ?api_key=KEY o header X-Api-Key: KEY
 
 ====================================================================
 1. HEALTH CHECK
@@ -10,86 +10,46 @@ GET /api/health
 → {"status":"ok","service":"music-api"}
 
 ====================================================================
-2. BUSCAR MÚSICA
+2. BUSCAR MÚSICA (Lavalink / YouTube Music)
 ====================================================================
 GET /api/search?q=<query>&source=ytmsearch
-  source: ytmsearch (default, YouTube Music → InnerTube directo),
-          ytsearch (YouTube normal → Lavalink),
-          spotify (Spotify Web API)
-
-  Cache: 60 segundos.
-
+  source: ytmsearch (default), ytsearch, spotify
 → {
     "query": "...",
     "source": "ytmsearch",
     "tracks": [
       {
+        "encoded": "...",
         "title": "Nombre canción",
-        "artist": "Artista",
-        "authors": ["Artista"],
-        "album": "Álbum",
+        "author": "Artista",
         "duration": 234000,
         "uri": "https://youtube.com/watch?v=...",
         "artworkUrl": "https://...",
-        "thumbnail": "https://...",
-        "videoId": "dQw4w9WgXcQ",
-        "source": "youtube",
-        "isrc": "USABC1234567",
-        "explicit": false
+        "source": "youtube"
       }
     ]
   }
 
-  NOTAS:
-  - ytmsearch usa InnerTube cliente propio (~1s). Si falla, cae a Lavalink (~3s).
-  - El campo videoId es el ID de YouTube de 11 caracteres para streaming.
-  - Los títulos llegan limpios (sin "Official Video", "[HD]", etc.).
-
 ====================================================================
-2b. SUGERENCIAS (Autocomplete)
+2b. BUSCAR VIDEOS (YouTube — ytsearch)
 ====================================================================
-GET /api/search/suggestions?q=<query>
-  Cache: 60 segundos
+GET /api/search/video?q=<query>
 → {
-    "query": "imagin",
-    "suggestions": ["imagine dragons", "imagination", "imagining"]
+    "query": "...",
+    "tracks": [
+      {
+        "uri": "https://youtube.com/watch?v=...",
+        "artworkUrl": "https://i.ytimg.com/.../maxresdefault.jpg",
+        "author": "Nombre canal/artista",
+        "title": "Título del video"
+      }
+    ]
   }
+Nota: artworkUrl es maxresdefault.jpg cuando está disponible.
+Cache: 5 min (igual que /api/search).
 
 ====================================================================
-3. STREAMING
-====================================================================
-GET /api/stream?id=<videoId>
-       &refresh=true   (opcional, fuerza re-resolución)
-       &video=true     (opcional, resuelve video + audio)
-
-  Flujo de resolución:
-    1. InnerTube /player → ~1s (directo del CDN de YouTube)
-    2. yt-dlp → ~3s
-    3. play-dl → (si no está en Render)
-    4. Invidious → iv.melmac.space
-
-→ HTTP 200 { "url": "https://..." }
-→ HTTP 403 { "error": "Video blocked in this region", "blocked": true, "videoId": "..." }
-→ HTTP 404 { "error": "No stream found after fallback" }
-
-  NOTAS:
-  - El servidor prioriza itag 251 (Opus 160kbps) para mejor calidad.
-  - 403 blocked → el cliente debe usar su InnertubeClient local como respaldo.
-  - 404 → error transitorio, reintentar o usar fallback local.
-  - Las URLs expiran (~6h), el servidor las renueva automáticamente.
-
-====================================================================
-4. PROXY DE AUDIO
-====================================================================
-GET /api/proxy/audio?url=<encoded_url>
-
-  Proxy para URLs de stream. El servidor descarga y re-sirve el audio.
-  Útil si el cliente no puede acceder directamente a los CDN de YouTube.
-
-→ Audio binario (streaming)
-
-====================================================================
-5. LETRAS (LRCLib)
+3. LETRAS (LRCLib + Genius fallback)
 ====================================================================
 GET /api/lyrics?track=<titulo>&artist=<artista>&album=<album>
 → {
@@ -103,76 +63,184 @@ GET /api/lyrics?track=<titulo>&artist=<artista>&album=<album>
   Si no encuentra: {"found":false,"synced":null,"plain":null}
 
 ====================================================================
-6. LIKES / FAVORITOS
+4. LIKES / FAVORITOS
 ====================================================================
-GET   /api/likes/<userId>?limit=0
-POST  /api/likes/<userId>     Body: { trackTitle, trackAuthor, trackUrl, ... }
+4a. LISTAR likes de un usuario
+GET /api/likes/<userId>?limit=0
+  limit=0 = todos, o un número
+→ {
+    "count": 5,
+    "songs": [
+      {
+        "id": "...",
+        "user_id": "...",
+        "track_title": "...",
+        "track_author": "...",
+        "track_url": "...",
+        "track_duration": 234000,
+        "artwork_url": "...",
+        "isrc": "...",
+        "liked_at": "2025-01-01T..."
+      }
+    ]
+  }
+
+4b. AGREGAR like
+POST /api/likes/<userId>
+  Body (JSON): {
+    "trackTitle": "Nombre",
+    "trackAuthor": "Artista",
+    "trackUrl": "https://...",
+    "trackDuration": 234000,
+    "artworkUrl": "https://...",
+    "isrc": "USABC1234567"
+  }
+→ {"added": true}
+
+4c. ELIMINAR like por ID (posición 1-based)
 DELETE /api/likes/<userId>/<id>
-DELETE /api/likes/<userId>    Body: { trackUrl }
+→ {"removed": true}
+
+4d. ELIMINAR like por URL
+DELETE /api/likes/<userId>
+  Body: {"trackUrl": "https://..."}
+→ {"removed": true}
+
+4e. ELIMINAR TODOS los likes
 DELETE /api/likes/<userId>/all
+→ {"removed": 15}
 
 ====================================================================
-7. ARTISTAS FAVORITOS
+5. ARTISTAS FAVORITOS
 ====================================================================
 GET /api/artists/<userId>
-→ { "artists": [ { "artist": "Nombre", "count": 10 } ] }
-
-====================================================================
-8. ESTADÍSTICAS
-====================================================================
-GET /api/stats/<userId>
-GET /api/stats/top?limit=10
-GET /api/top-tracks/<userId>?limit=10
-
-====================================================================
-9. PLAYLISTS
-====================================================================
-GET    /api/playlists/<userId>?guildId=<guildId>
-POST   /api/playlists/<userId>   Body: { guildId, name, tracks }
-DELETE /api/playlists/<userId>/<index>?guildId=<guildId>
-
-====================================================================
-10. INFO DE ARTISTA
-====================================================================
-GET /api/artist/info?name=<artist>
 → {
-    "name": "Queen",
-    "image": "https://...",
-    "fans": 12710404,
-    "description": "...",
-    "source": "wikipedia(en)"
+    "artists": [
+      {"artist": "Nombre Artista", "count": 10}
+    ]
   }
-  Fuentes: Deezer (imagen, fans) + Wikipedia (descripción)
 
 ====================================================================
-11. ENRIQUECER METADATOS
+6. ESTADÍSTICAS
 ====================================================================
-POST /api/metadata/enrich  Body: { tracks: [...] }
-  Enriquece tracks con datos de YouTube Music, Deezer, ISRC.
-  Resuelve hasta 6 tracks por request.
+6a. Estadísticas de un usuario
+GET /api/stats/<userId>
+→ {
+    "stats": {
+      "user_id": "...",
+      "tracks_played": 42,
+      "total_listen_time": 1234567,
+      "favorite_artist": "...",
+      "last_played": "2025-01-01T..."
+    }
+  }
+
+6b. Top oyentes global
+GET /api/stats/top?limit=10
+→ {"top": [{"user_id":"...","tracks_played":99,...}]}
+
+====================================================================
+7. CANCIONES MÁS ESCUCHADAS
+====================================================================
+GET /api/top-tracks/<userId>?limit=10
+→ {
+    "tracks": [
+      {
+        "track_title": "...",
+        "track_author": "...",
+        "track_url": "...",
+        "play_count": 25
+      }
+    ]
+  }
+
+====================================================================
+8. RECOMENDACIONES (Spotify)
+====================================================================
+GET /api/recommendations/<userId>
+→ {
+    "tracks": [
+      {
+        "id": "spotify:track:...",
+        "title": "...",
+        "artist": "...",
+        "album": "...",
+        "thumbnail": "https://...",
+        "duration": 234000,
+        "uri": "spotify:track:...",
+        "isrc": "...",
+        "previewUrl": null
+      }
+    ]
+  }
+
+====================================================================
+9. BUSCAR EN SPOTIFY
+====================================================================
+GET /api/spotify/search?q=<query>&limit=5
+→ {"tracks": [misma estructura que recommendations]}
+
+====================================================================
+10. PLAYLISTS
+====================================================================
+10a. LISTAR playlists de un usuario
+GET /api/playlists/<userId>?guildId=<guildId>
+→ {
+    "playlists": [
+      {
+        "id": "...",
+        "guild_id": "...",
+        "user_id": "...",
+        "name": "Mi playlist",
+        "tracks": "[...]",
+        "created_at": "..."
+      }
+    ]
+  }
+
+10b. GUARDAR playlist
+POST /api/playlists/<userId>
+  Body: {
+    "guildId": "...",
+    "name": "Nombre playlist",
+    "tracks": [{...}, {...}]
+  }
+→ {"id": "..."}
+
+10c. ELIMINAR playlist
+DELETE /api/playlists/<userId>/<index>?guildId=<guildId>
+→ {"changes": 1}
+
+====================================================================
+11. HISTORIAL
+====================================================================
+GET /api/history/<guildId>?limit=50
+→ {
+    "history": [
+      {
+        "id": "...",
+        "guild_id": "...",
+        "track_title": "...",
+        "track_author": "...",
+        "track_url": "...",
+        "track_duration": 234000,
+        "played_at": "..."
+      }
+    ]
+  }
 
 ====================================================================
 12. TTS (Text-to-Speech)
 ====================================================================
-POST /api/tts  Body: { "text": "...", "voice": "es-MX-DaliaNeural" }
+POST /api/tts
+  Body: {"text": "Hola mundo", "voice": "es-MX-DaliaNeural"}
 → Audio MP3 binario
 
 ====================================================================
 NOTAS PARA ANDROID:
-- userId puede ser cualquier string único (UUID generado en la app)
-- guildId para playlists/history: usar "android-app"
+- userId puede ser cualquier string único (ej: UUID generado en la app)
+- guildId para playlists/history: usar un valor fijo como "android-app"
 - Los likes se identifican por trackUrl (único por usuario)
-- source en search: "ytmsearch" es YouTube Music (InnerTube directo),
-  "ytsearch" es YouTube normal (Lavalink)
-- IMPORTANTE: el campo videoId en search es el ID de YouTube que el
-  cliente necesita para streaming optimizado.
-- Streaming: el servidor resuelve en este orden:
-  1. InnerTube /player (~1s, sin cookies, prioriza Opus 251)
-  2. yt-dlp (~3-5s, fallback)
-  3. play-dl (solo si no Render)
-  4. Invidious iv.melmac.space (~4s, fallback final)
-  5. Cliente debe usar su InnertubeClient local si todo falla
-- 403 blocked → el video no está disponible en esta región. El cliente
-  debe usar su InnertubeClient local como respaldo, sin mostrar error.
-- Rate limits del servidor: 10 búsquedas/s, 3 player requests/s a InnerTube.
-- Cache de player: 6 horas (mismo video no re-resuelve).
+- source en search: "ytmsearch" es YouTube Music (mejor calidad),
+  "ytsearch" es YouTube normal
+- El APK no necesita Discord SDK, solo HTTP client (OkHttp / Retrofit)

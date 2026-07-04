@@ -1,7 +1,6 @@
 require("dotenv").config();
 const { initDB } = require("./database");
 const { app: musicApi } = require("./api/server");
-const innertube = require("./services/innertube");
 
 // Usar el puerto de Render o 3000 por defecto
 const PORT = process.env.PORT || 3000;
@@ -17,12 +16,7 @@ async function main() {
     console.error("❌ Database initialization failed:", err.message);
   }
 
-  // 2. Inicializar InnerTube (fail-fast)
-  innertube.initialize().catch(err => {
-    console.warn(`[InnerTube] Startup initialization failed: ${err.message}`);
-  });
-
-  // 3. Iniciar Servidor Express
+  // 2. Iniciar Servidor Express
   const server = musicApi.listen(PORT, () => {
     console.log(`[SERVER] Running on port ${PORT}`);
   });
@@ -31,7 +25,7 @@ async function main() {
     process.exit(1);
   });
 
-  // 4. TTS Keepalive (Opcional, si está configurado)
+  // 3. TTS Keepalive (Opcional, si está configurado)
   const ttsProvider = (process.env.TTS_PROVIDER || "google").toLowerCase();
   if (ttsProvider === "edge" || ttsProvider === "kokoro") {
     const edgeApiUrl = process.env.EDGE_API_URL || process.env.KOKORO_API_URL;
