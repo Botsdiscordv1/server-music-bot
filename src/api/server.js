@@ -1543,78 +1543,86 @@ function signToken(user, provider = "android") {
 }
 
 // ── Discord OAuth Strategy ────────────────────────────────────────────
-passport.use(new DiscordStrategy({
-  clientID: process.env.DISCORD_CLIENT_ID,
-  clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  callbackURL: process.env.DISCORD_CALLBACK_URL || "http://192.168.18.81:3000/api/auth/discord/callback",
-  scope: ["identify", "email"],
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    if (!DiscordUser) return done(new Error("Discord database not configured"));
-    let user = await DiscordUser.findOne({ discordId: profile.id });
-    if (user) return done(null, user);
+if (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET) {
+  passport.use(new DiscordStrategy({
+    clientID: process.env.DISCORD_CLIENT_ID,
+    clientSecret: process.env.DISCORD_CLIENT_SECRET,
+    callbackURL: process.env.DISCORD_CALLBACK_URL || "http://192.168.18.81:3000/api/auth/discord/callback",
+    scope: ["identify", "email"],
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      if (!DiscordUser) return done(new Error("Discord database not configured"));
+      let user = await DiscordUser.findOne({ discordId: profile.id });
+      if (user) return done(null, user);
 
-    const email = profile.email || null;
-    if (email) {
-      user = await DiscordUser.findOne({ email });
-      if (user) {
-        user.discordId = profile.id;
-        if (!user.avatar && profile.avatar) user.avatar = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`;
-        await user.save();
-        return done(null, user);
+      const email = profile.email || null;
+      if (email) {
+        user = await DiscordUser.findOne({ email });
+        if (user) {
+          user.discordId = profile.id;
+          if (!user.avatar && profile.avatar) user.avatar = `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`;
+          await user.save();
+          return done(null, user);
+        }
       }
-    }
 
-    user = await DiscordUser.create({
-      username: profile.username || profile.global_name || `discord_${profile.id}`,
-      email,
-      discordId: profile.id,
-      avatar: profile.avatar ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png` : "",
-    });
-    return done(null, user);
-  } catch (err) {
-    return done(err);
-  }
-}));
+      user = await DiscordUser.create({
+        username: profile.username || profile.global_name || `discord_${profile.id}`,
+        email,
+        discordId: profile.id,
+        avatar: profile.avatar ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png` : "",
+      });
+      return done(null, user);
+    } catch (err) {
+      return done(err);
+    }
+  }));
+} else {
+  console.log("[OAUTH] Discord Strategy disabled: DISCORD_CLIENT_ID/SECRET not configured.");
+}
 
 // ── Google OAuth Strategy ─────────────────────────────────────────────
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: process.env.GOOGLE_CALLBACK_URL || "/api/auth/google/callback",
-  scope: ["profile", "email"],
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    // 1. Buscar por googleId
-    let user = await User.findOne({ googleId: profile.id });
-    if (user) return done(null, user);
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: process.env.GOOGLE_CALLBACK_URL || "/api/auth/google/callback",
+    scope: ["profile", "email"],
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      // 1. Buscar por googleId
+      let user = await User.findOne({ googleId: profile.id });
+      if (user) return done(null, user);
 
-    // 2. Si tiene email, buscar si ya existe la cuenta y vincularla
-    const email = profile.emails?.[0]?.value || null;
-    if (email) {
-      user = await User.findOne({ email });
-      if (user) {
-        user.googleId = profile.id;
-        if (!user.avatar && profile.photos?.[0]?.value) {
-          user.avatar = profile.photos[0].value;
+      // 2. Si tiene email, buscar si ya existe la cuenta y vincularla
+      const email = profile.emails?.[0]?.value || null;
+      if (email) {
+        user = await User.findOne({ email });
+        if (user) {
+          user.googleId = profile.id;
+          if (!user.avatar && profile.photos?.[0]?.value) {
+            user.avatar = profile.photos[0].value;
+          }
+          await user.save();
+          return done(null, user);
         }
-        await user.save();
-        return done(null, user);
       }
-    }
 
-    // 3. Crear nuevo usuario
-    user = await User.create({
-      username: profile.displayName || profile.name?.givenName || `google_${profile.id}`,
-      email,
-      googleId: profile.id,
-      avatar: profile.photos?.[0]?.value || "",
-    });
-    return done(null, user);
-  } catch (err) {
-    return done(err);
-  }
-}));
+      // 3. Crear nuevo usuario
+      user = await User.create({
+        username: profile.displayName || profile.name?.givenName || `google_${profile.id}`,
+        email,
+        googleId: profile.id,
+        avatar: profile.photos?.[0]?.value || "",
+      });
+      return done(null, user);
+    } catch (err) {
+      return done(err);
+    }
+  }));
+} else {
+  console.log("[OAUTH] Google Strategy disabled: GOOGLE_CLIENT_ID/SECRET not configured.");
+}
 
 app.post("/api/auth/register", async (req, res) => {
   try {
@@ -1672,9 +1680,17 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
 });
 
 // ── Discord OAuth routes ──────────────────────────────────────────────
-app.get("/api/auth/discord", passport.authenticate("discord", { session: false }));
+app.get("/api/auth/discord", (req, res, next) => {
+  if (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET) {
+    return res.status(501).json({ error: "Discord authentication is not configured on this server." });
+  }
+  passport.authenticate("discord", { session: false })(req, res, next);
+});
 
 app.get("/api/auth/discord/callback", (req, res, next) => {
+  if (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET) {
+    return res.status(501).json({ error: "Discord authentication is not configured on this server." });
+  }
   passport.authenticate("discord", { session: false }, (err, user) => {
     if (err || !user) {
       return res.status(401).json({ error: "auth_failed" });
@@ -1692,6 +1708,9 @@ app.get("/api/auth/discord/callback", (req, res, next) => {
 });
 
 app.get("/api/auth/google/callback", (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(501).json({ error: "Google authentication is not configured on this server." });
+  }
   passport.authenticate("google", { session: false }, (err, user) => {
     if (err || !user) {
       console.error("[Google OAuth] Error:", err?.message);
@@ -1753,11 +1772,17 @@ app.post("/api/auth/google", async (req, res) => {
   }
 });
 
-app.get("/api/auth/google",
-  passport.authenticate("google", { session: false, scope: ["profile", "email"] })
-);
+app.get("/api/auth/google", (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(501).json({ error: "Google authentication is not configured on this server." });
+  }
+  passport.authenticate("google", { session: false, scope: ["profile", "email"] })(req, res, next);
+});
 
 app.get("/api/auth/google/callback", (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(501).json({ error: "Google authentication is not configured on this server." });
+  }
   passport.authenticate("google", { session: false }, (err, user) => {
     if (err || !user) {
       console.error("[Google OAuth] Error:", err?.message);
